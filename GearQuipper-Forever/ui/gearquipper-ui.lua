@@ -159,6 +159,9 @@ function c:InitUI(paperDollFrame)
                             end
                         end
                     end)
+                    frame:HookScript("OnEnter", function()
+                        c:HoverQuickBar(slotId);
+                    end)
                 end
             end
         end

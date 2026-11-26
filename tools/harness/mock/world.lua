@@ -254,6 +254,13 @@ end
 function IsLeftAltKeyDown()
     return H.modifiers.alt;
 end
+-- SHOWITEMFLYOUT defaults to Alt on the paper doll
+function IsModifiedClick(action)
+    if action == "SHOWITEMFLYOUT" then
+        return H.modifiers.alt;
+    end
+    return false;
+end
 function IsModifierKeyDown()
     return H.modifiers.shift or H.modifiers.ctrl or H.modifiers.alt;
 end

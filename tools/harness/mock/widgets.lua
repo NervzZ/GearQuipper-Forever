@@ -210,6 +210,16 @@ function H.fireScript(obj, scriptName, ...)
     end
 end
 
+-- The mouse enters / leaves a frame: IsMouseOver follows, OnEnter / OnLeave fire (motion = true).
+function H.mouseEnter(obj)
+    P[obj].mouseOver = true;
+    H.fireScript(obj, "OnEnter", true);
+end
+function H.mouseLeave(obj)
+    P[obj].mouseOver = false;
+    H.fireScript(obj, "OnLeave", true);
+end
+
 local function checkScript(obj, method, scriptName)
     if not VALID_SCRIPTS[scriptName] then
         error(string.format('%s:%s(): Doesn\'t have a "%s" script', describe(obj), method, tostring(scriptName)), 3);
@@ -450,8 +460,8 @@ local function regionCommon()
         GetEffectiveScale = function(self)
             return P[self].scale;
         end,
-        IsMouseOver = function()
-            return false;
+        IsMouseOver = function(self)
+            return P[self] ~= nil and P[self].mouseOver == true;
         end,
         GetCenter = function()
             return 0, 0;

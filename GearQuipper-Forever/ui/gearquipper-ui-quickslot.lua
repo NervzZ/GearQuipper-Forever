@@ -28,6 +28,26 @@ local function IsBlizzardFlyoutShown()
     return EquipmentFlyoutFrame and EquipmentFlyoutFrame:IsShown();
 end
 
+-- Mouse on the paper-doll slot, the bar (with a little slack for the gap between them) or one of its buttons.
+local function IsMouseOverBar(bar)
+    if bar.parent:IsMouseOver() or bar:IsMouseOver(4, -4, -4, 4) then
+        return true;
+    end
+    for _, quickSlot in pairs(bar.slots or {}) do
+        if quickSlot:IsShown() and quickSlot:IsMouseOver() then
+            return true;
+        end
+    end
+    return false;
+end
+
+local function IsBlizzardFlyoutModifierDown()
+    if IsModifiedClick then
+        return IsModifiedClick("SHOWITEMFLYOUT");
+    end
+    return IsAltKeyDown();
+end
+
 local function IsPlayerBag(bagId)
     for _, id in ipairs(c:GetBagIds()) do
         if id == bagId then
@@ -188,12 +208,29 @@ function c:CreateQuickBar(slotId)
     local slotSize, slotMargin = GetSlotDimensions(slotId);
 
     frame:SetFrameStrata("HIGH");
-    frame:SetScript("OnHide", function()
+    frame:SetScript("OnHide", function(self)
         c:HighlightItemsInBags();
-        ClearCursor();
+        -- a hover bar never owned the cursor; clearing it would drop whatever the player is holding
+        if not self.hoverOpened then
+            ClearCursor();
+        end
+        self.hoverOpened = nil;
+    end);
+    frame:SetScript("OnUpdate", function(self, elapsed)
+        if not self.hoverOpened then
+            return;
+        end
+        self.hoverElapsed = (self.hoverElapsed or 0) + elapsed;
+        if self.hoverElapsed >= 0.1 then
+            self.hoverElapsed = 0;
+            if not IsMouseOverBar(self) then
+                c:CloseQuickBar(self.slotId);
+            end
+        end
     end);
 
     frame.parent = parent;
+    frame.slotId = slotId;
 
     frame.border = frame:CreateTexture("GQ_QuickBarBorderTex", "BORDER");
     frame.border:SetTexture("Interface\\PaperDoll\\UI-Backpack-EmptySlot.blp");
@@ -329,7 +366,9 @@ local function CanOpenQuickBar(slotId)
     return slotId and c:GetSlotInfo(slotId) and not c:IsInCombat() and not c:IsDead() and not IsBlizzardFlyoutShown();
 end
 
-local function ShowQuickBar(slotId)
+-- hover: opened by mouse-over (closes when the mouse leaves, keeps the slot's tooltip, no bag dimming);
+-- otherwise opened by a click or a pick-up and stays until GQ's usual close triggers.
+local function ShowQuickBar(slotId, hover)
     -- each item once (identical copies, ammo stacks); the ammo bar skips the ammo type that is already equipped
     local entries, itemStrings = {}, {};
     local equippedAmmoId = slotId == INVSLOT_AMMO and GetInventoryItemID("player", INVSLOT_AMMO);
@@ -365,13 +404,36 @@ local function ShowQuickBar(slotId)
             quickBars[slotId].border:SetWidth((slotSize * index) + (slotMargin * (index - 1)) + (slotMargin * 2));
             quickBars[slotId]:SetWidth((slotSize * index) + (slotMargin * (index - 1)));
         end
+        quickBars[slotId].hoverOpened = hover and true or nil;
+        quickBars[slotId].hoverElapsed = 0;
         quickBars[slotId]:Show();
 
-        c:HighlightItemsInBags(itemStrings);
-        GameTooltip:Hide();
+        if not hover then
+            c:HighlightItemsInBags(itemStrings);
+            GameTooltip:Hide();
+        end
 
         return quickBars[slotId];
     end
+end
+
+-- Hovering a paper-doll slot shows its bar (as EqManager does); click and pick-up keep working as in GQ.
+-- Holding the flyout modifier (Alt) leaves the slot to Blizzard's own flyout.
+function c:HoverQuickBar(slotId)
+    if not CanOpenQuickBar(slotId) or IsBlizzardFlyoutModifierDown() or CursorHasItem() or c:IsSwitching() then
+        return;
+    end
+    if quickBars and quickBars[slotId] and quickBars[slotId]:IsShown() then
+        return;
+    end
+    if quickBars then
+        for otherSlotId in pairs(quickBars) do
+            if otherSlotId ~= slotId then
+                c:CloseQuickBar(otherSlotId);
+            end
+        end
+    end
+    ShowQuickBar(slotId, true);
 end
 
 local pendingOpens = {};
