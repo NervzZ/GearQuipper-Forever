@@ -301,7 +301,7 @@ function c:InitOptions()
     end
 
     GQ_OPTIONS[c.OPT_SAVECHANGES] = GQ_OPTIONS[c.OPT_SAVECHANGES] or c.OPTVALUE_SAVECHANGES_GQMENU;
-    GQ_OPTIONS[c.OPT_SWITCHDELAY] = GQ_OPTIONS[c.OPT_SWITCHDELAY] or 600;
+    GQ_OPTIONS[c.OPT_SWITCHDELAY] = GQ_OPTIONS[c.OPT_SWITCHDELAY] or 200;
 
     -- main panel: built and registered only once (c:Init() runs again after a reset)
     if not optionsPanel then

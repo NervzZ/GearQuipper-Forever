@@ -6,7 +6,7 @@ c.name = "GearQuipper";
 GQ_OPTIONS = GQ_OPTIONS or {};
 GQ_DATA = GQ_DATA or {};
 
-local GQ_VERSION = 55;
+local GQ_VERSION = 56;
 
 c.VALUE_NONE = "VALUE_NONE";
 c.KEYWORD_NONE = "$NONE";
@@ -31,6 +31,10 @@ function c:Init()
             -- reset bag/bank location index
             c:ResetBagLocationIndex();
             c:ResetBankLocationIndex();
+        end
+        if GQ_OPTIONS[c.OPT_VERSION] < 56 and GQ_OPTIONS[c.OPT_SWITCHDELAY] == 600 then
+            -- switches wait for the server now; the delay only feeds fallbacks and debounces (old default 600)
+            GQ_OPTIONS[c.OPT_SWITCHDELAY] = 200;
         end
 
         GQ_OPTIONS[c.OPT_SHOW_WATERMARK] = true;

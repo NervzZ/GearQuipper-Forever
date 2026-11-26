@@ -40,6 +40,17 @@ local MAX_SWITCH_PASSES = 3;
 local PASS_DONE, PASS_ERROR, PASS_COMBAT, PASS_ACTION, PASS_BLOCKED = 1, 2, 3, 4, 5;
 local SLOT_OK, SLOT_WAIT, SLOT_FAILED, SLOT_MISSING, SLOT_ERROR = 1, 2, 3, 4, 5;
 
+-- A switch moves on as soon as the server has answered its actions (see AwaitLanding). These fallbacks (ms, plus home
+-- latency and the switch delay) only cover events that never come; while the server has not answered at all they
+-- keep waiting, for at most MAX_LANDING_WAIT seconds.
+local PASS_FALLBACK_MS, FINISH_FALLBACK_MS = 100, 500;
+local MAX_LANDING_WAIT = 5;
+
+-- A spec change is done when ACTIVE_TALENT_GROUP_CHANGED fires; this settle (ms, plus home latency) only lets quick
+-- double changes collapse into the last one.
+local TALENT_SETTLE_MS = 200;
+local TALENT_CAST_WAIT, TALENT_CAST_WAIT_TRIES = 0.1, 50;
+
 c.SWITCHARG_FIRST = "SWITCHARG_FIRST";
 c.SWITCHARG_ID = "SWITCHARG_ID";
 c.SWITCHARG_NOTIFY = "SWITCHARG_NOTIFY";
@@ -67,8 +78,9 @@ local function GetNextSwitchId()
     return switchId;
 end
 
+-- only feeds fallbacks and debounces
 local function SwitchDelay()
-    return GQ_OPTIONS[c.OPT_SWITCHDELAY] or 600;
+    return GQ_OPTIONS[c.OPT_SWITCHDELAY] or 200;
 end
 
 function c:NotifyInChat(msg)
@@ -110,13 +122,25 @@ function c:IsSwitching()
     return switching;
 end
 
+-- Gear slots the running (or last) switch changed -> item string it put there. For a short while after the switch an
+-- equip event that only repeats that state is the switch's own late echo, not a manual change (see EquipmentChanged).
+local switchEchoSlots, switchEchoUntil = {}, 0;
+local SWITCH_ECHO_SECONDS = 2;
+
 function c:SetSwitching(value)
     switching = value;
     if value then
+        wipe(switchEchoSlots);
         c:DebugPrint("Switching: true");
     else
+        switchEchoUntil = GetTime() + SWITCH_ECHO_SECONDS;
         c:DebugPrint("Switching: false");
     end
+end
+
+local function IsSwitchEcho(slotId)
+    return GetTime() <= switchEchoUntil and switchEchoSlots[slotId] ~= nil and
+               c:GetItemString(slotId) == switchEchoSlots[slotId];
 end
 
 function c:GetNextSetName(seedName)
@@ -471,6 +495,20 @@ local function ReleaseEnchantSnapshot()
     end
 end
 
+local function FireTalentsChanged(changeId, newGroup, triesLeft)
+    if changeId ~= talentChangeId then
+        return;
+    end
+    if triesLeft > 0 and c:IsCastingSpell() then
+        -- the spec change's own cast may still be ending: switch right after it instead of queueing behind it
+        C_Timer.After(TALENT_CAST_WAIT, function()
+            FireTalentsChanged(changeId, newGroup, triesLeft - 1);
+        end);
+        return;
+    end
+    c:HandleEvent(c.EVENT_TALENTS_CHANGED, c:GetActiveSpecGroup() or newGroup);
+end
+
 local function TalentGroupChanged(newGroup, oldGroup)
     newGroup = (not c:IsSecret(newGroup) and tonumber(newGroup)) or c:GetActiveSpecGroup();
     oldGroup = not c:IsSecret(oldGroup) and tonumber(oldGroup);
@@ -487,12 +525,121 @@ local function TalentGroupChanged(newGroup, oldGroup)
     -- only the last of several quick spec changes counts
     talentChangeId = talentChangeId + 1;
     local changeId = talentChangeId;
-    -- timeout needed for waiting until the game has finished its own spec change work
-    C_Timer.After(c:GetHomeLatency(1000 + SwitchDelay()) / 1000, function()
-        if changeId == talentChangeId then
-            c:HandleEvent(c.EVENT_TALENTS_CHANGED, c:GetActiveSpecGroup() or newGroup);
-        end
+    C_Timer.After(c:GetHomeLatency(TALENT_SETTLE_MS) / 1000, function()
+        FireTalentsChanged(changeId, newGroup, TALENT_CAST_WAIT_TRIES);
     end);
+end
+
+----- [ waiting for the server ] -----
+
+-- After a switch pass, the next pass and the end of the switch wait until the server has answered the pass's actions:
+-- until then the touched items stay locked and reads show the old gear and bags. The actions have landed when every
+-- touched gear slot and bag cell is unlocked, every touched gear slot has had its PLAYER_EQUIPMENT_CHANGED and holds
+-- the item the pass expects, and the slots that waited for a lock this pass did not cause are free. The check runs one
+-- frame after any inventory event, so all events of a server reply have been handled by then.
+local landing, landingCheckPending;
+
+local function NewWatch()
+    return {
+        slots = {}, -- gear slot the pass changed -> item string it expects there (VALUE_NONE = empty)
+        cells = {}, -- cell key -> location {bagId, slotId} the pass took an item from (bags and bank)
+        lockedSlots = {}, -- gear slots that waited for someone else's lock
+        lockedCells = {}, -- cell key -> location, same for bag cells
+        equipChanged = {} -- gear slots whose PLAYER_EQUIPMENT_CHANGED arrived
+        -- ammo: ammo item id the pass equipped; final: the switch ends with this watch; inventoryChanged
+    };
+end
+
+local function IsWatchEmpty(watch)
+    return not (next(watch.slots) or next(watch.cells) or next(watch.lockedSlots) or next(watch.lockedCells) or
+               watch.ammo);
+end
+
+-- false while the server has not answered the pass's own actions
+local function OwnLocationsUnlocked(watch)
+    for slotId in pairs(watch.slots) do
+        if IsSlotLocked(slotId) then
+            return false;
+        end
+    end
+    for _, location in pairs(watch.cells) do
+        if IsBagSlotLocked(location.bagId, location.slotId) then
+            return false;
+        end
+    end
+    return true;
+end
+
+local function HasLanded(watch)
+    if not OwnLocationsUnlocked(watch) then
+        return false;
+    end
+    for slotId in pairs(watch.lockedSlots) do
+        if IsSlotLocked(slotId) then
+            return false;
+        end
+    end
+    for _, location in pairs(watch.lockedCells) do
+        if IsBagSlotLocked(location.bagId, location.slotId) then
+            return false;
+        end
+    end
+    for slotId, itemString in pairs(watch.slots) do
+        if not watch.equipChanged[slotId] or c:GetItemString(slotId) ~= itemString then
+            return false;
+        end
+    end
+    if watch.ammo and not c:Equals(c:GetItemString(INVSLOT_AMMO), watch.ammo) then
+        return false;
+    end
+    -- the switch's own UNIT_INVENTORY_CHANGED (ammo auto-save) must also arrive while the switching flag is up
+    if watch.final and (next(watch.slots) or watch.ammo) and not watch.inventoryChanged then
+        return false;
+    end
+    return true;
+end
+
+local function CheckLanding()
+    landingCheckPending = false;
+    if landing and HasLanded(landing) then
+        landing.land();
+    end
+end
+
+-- on every inventory event: check once, on the next frame
+local function ScheduleLandingCheck()
+    if landing and not landingCheckPending then
+        landingCheckPending = true;
+        C_Timer.After(0, CheckLanding);
+    end
+end
+
+-- Runs onLanded once the watched actions have landed. The fallback covers events that never come (a refused move
+-- unlocks without an equip event); it keeps waiting while the own locations are still locked (no server answer yet),
+-- up to MAX_LANDING_WAIT.
+local function AwaitLanding(watch, fallbackMs, onLanded)
+    local deadline = GetTime() + MAX_LANDING_WAIT;
+    watch.land = function()
+        if landing == watch then
+            landing = nil;
+            onLanded();
+        end
+    end;
+    local function Fallback()
+        if landing ~= watch then
+            return;
+        end
+        if OwnLocationsUnlocked(watch) or GetTime() >= deadline then
+            c:DebugPrint("Switch: moving on without all server events (fallback)");
+            -- one more frame for the events of a reply that is being handled right now
+            C_Timer.After(0, watch.land);
+        else
+            C_Timer.After(c:GetHomeLatency(fallbackMs) / 1000, Fallback);
+        end
+    end
+    landing = watch;
+    C_Timer.After(c:GetHomeLatency(fallbackMs) / 1000, Fallback);
+    ScheduleLandingCheck(); -- a watch with nothing to wait for lands on the next frame
 end
 
 local function NotifyCombatEquipBlocked()
@@ -608,16 +755,26 @@ c.eventFrame:HookScript("OnEvent", function(self, event, arg1, arg2, arg3)
             end
         end
     elseif event == "UNIT_INVENTORY_CHANGED" then
+        if landing then
+            landing.inventoryChanged = true;
+        end
+        ScheduleLandingCheck();
         -- ammo slot workaround
         c:EquipmentChanged(INVSLOT_AMMO);
         ScheduleEnchantCheck();
     elseif event == "PLAYER_EQUIPMENT_CHANGED" then
+        if landing and not c:IsSecret(arg1) and arg1 then
+            landing.equipChanged[arg1] = true;
+        end
+        ScheduleLandingCheck();
         if arg1 ~= INVSLOT_AMMO then
             c:EquipmentChanged(arg1);
         end
     elseif event == "BAG_UPDATE_DELAYED" then
+        ScheduleLandingCheck();
         ScheduleEnchantCheck();
     elseif event == "ITEM_LOCK_CHANGED" then
+        ScheduleLandingCheck();
         if not enchantSnapshotPinned and not c:IsInCombat() and not c:IsDead() and not c:IsSwitching() and
             not bankAction then
             lastGearAndBagsCache = c:CacheCurrentGearAndBags();
@@ -630,6 +787,7 @@ c.eventFrame:HookScript("OnEvent", function(self, event, arg1, arg2, arg3)
             end
         end
     elseif event == "ITEM_UNLOCKED" then
+        ScheduleLandingCheck();
         c:CloseQuickBars();
         if GqUiFrame and GqUiFrame:IsVisible() and not c:IsSwitching() then
             c:RefreshSetList();
@@ -679,7 +837,7 @@ end);
 
 function c:EquipmentChanged(slotId)
     -- slot ids beyond the gear slots (bags, bank tabs) are not ours
-    if c:IsSwitching() or not slotId or not c:GetSlotInfo(slotId) then
+    if c:IsSwitching() or not slotId or not c:GetSlotInfo(slotId) or IsSwitchEcho(slotId) then
         return;
     end
     if slotId == INVSLOT_AMMO and not IsAmmoNeeded() then
@@ -1068,8 +1226,12 @@ DrainQueue = function()
     end
 end
 
-function c:FinishSwitch(switchArgs)
-    C_Timer.After(c:GetHomeLatency(500 + SwitchDelay()) / 1000, function()
+-- watch: the actions of the switch's last pass. The switching flag stays up until they have landed, so the switch's own
+-- equip events are never auto-saved.
+function c:FinishSwitch(switchArgs, watch)
+    watch = watch or NewWatch();
+    watch.final = true;
+    AwaitLanding(watch, FINISH_FALLBACK_MS + SwitchDelay(), function()
         local setName = switchArgs[c.SWITCHARG_SETNAME];
 
         if actionBlocked then
@@ -1187,7 +1349,8 @@ local function NormalizeTarget(slotId, value)
 end
 
 -- first copy of the item in the bags that is neither locked nor taken already; also tells whether a copy was busy
-local function FindBagCopy(itemString, usedCells)
+-- (lockedCells, optional, collects the locked copies)
+local function FindBagCopy(itemString, usedCells, lockedCells)
     local busy;
     local list = c:FindItemInBags(itemString);
     if list then
@@ -1196,6 +1359,9 @@ local function FindBagCopy(itemString, usedCells)
             if not usedCells[key] then
                 if IsBagSlotLocked(location.bagId, location.slotId) then
                     busy = true;
+                    if lockedCells then
+                        lockedCells[key] = location;
+                    end
                 else
                     return location, key;
                 end
@@ -1228,7 +1394,10 @@ local function PullItemFromBank(itemString, bagSpaceCache, usedCells)
     local containerId, containerSlotId = FindItemInBankUnused(itemString, usedCells);
     if containerId and containerSlotId then
         if usedCells then
-            usedCells[CellKey(containerId, containerSlotId)] = true;
+            usedCells[CellKey(containerId, containerSlotId)] = {
+                bagId = containerId,
+                slotId = containerSlotId
+            };
         end
         c:SaveLastBankLocation(itemString, containerId, containerSlotId);
         c:PickupContainerItem(containerId, containerSlotId);
@@ -1268,8 +1437,19 @@ local function EquipSetPass(session)
         equipped[slotId] = c:GetItemString(slotId);
     end
     local mainHandWasTwoHand = IsTwoHandItem(equipped[INVSLOT_MAINHAND]);
+    -- usedCells: cell key -> location the pass took an item from (true: tried, nothing picked up)
     local touched, usedCells, displaced = {}, {}, {};
     local pending = 0;
+    local watch = NewWatch();
+
+    -- a gear slot this pass has not touched but finds locked: the next pass waits for it as well
+    local function IsLockedElsewhere(slotId)
+        if IsSlotLocked(slotId) then
+            watch.lockedSlots[slotId] = true;
+            return true;
+        end
+        return false;
+    end
 
     local function IsOnTarget(slotId, target)
         if slotId == INVSLOT_AMMO then
@@ -1288,7 +1468,7 @@ local function EquipSetPass(session)
             if otherSlotId ~= slotId and not ignored[otherSlotId] and equipped[otherSlotId] == itemString then
                 local otherTarget = targets[otherSlotId];
                 if (otherTarget ~= nil and otherTarget ~= itemString) or (otherTarget == nil and allowInactive) then
-                    if touched[otherSlotId] or IsSlotLocked(otherSlotId) then
+                    if touched[otherSlotId] or IsLockedElsewhere(otherSlotId) then
                         busy = true;
                     elseif not CanMoveToSlot(equipped[slotId], otherSlotId) then
                         if otherTarget ~= nil then
@@ -1326,6 +1506,7 @@ local function EquipSetPass(session)
         ClearCursor();
         PickupInventoryItem(donorSlotId);
         if not CursorHasItem() then
+            watch.lockedSlots[donorSlotId] = true;
             return SLOT_WAIT;
         end
         if not CursorCanGoInSlot(slotId) then
@@ -1344,16 +1525,18 @@ local function EquipSetPass(session)
 
     local function EquipFromBag(slotId, itemString, location, key)
         local displacedSlotId = GetDisplacedWeaponSlot(slotId, itemString);
-        if displacedSlotId and (touched[displacedSlotId] or IsSlotLocked(displacedSlotId)) then
+        if displacedSlotId and (touched[displacedSlotId] or IsLockedElsewhere(displacedSlotId)) then
             return SLOT_WAIT;
         end
 
         ClearCursor();
         c:PickupContainerItem(location.bagId, location.slotId);
-        usedCells[key] = true;
         if not CursorHasItem() then
+            usedCells[key] = true;
+            watch.lockedCells[key] = location;
             return SLOT_WAIT;
         end
+        usedCells[key] = location;
         if not CursorCanGoInSlot(slotId) then
             ClearCursor();
             return SLOT_FAILED;
@@ -1389,13 +1572,14 @@ local function EquipSetPass(session)
             touched[slotId] = true;
             return SLOT_OK;
         elseif nothingPickedUp then
+            watch.lockedSlots[slotId] = true;
             return SLOT_WAIT;
         end
         return SLOT_ERROR;
     end
 
     local function ProcessSlot(slotId, target)
-        if touched[slotId] or IsSlotLocked(slotId) then
+        if touched[slotId] or IsLockedElsewhere(slotId) then
             return SLOT_WAIT;
         end
 
@@ -1410,6 +1594,7 @@ local function EquipSetPass(session)
             end
             ClearCursor();
             c:EquipItemByName(target);
+            watch.ammo = target;
             return SLOT_OK;
         end
 
@@ -1424,7 +1609,7 @@ local function EquipSetPass(session)
             return SwapWith(slotId, donorSlotId);
         end
 
-        local location, key, copyBusy = FindBagCopy(target, usedCells);
+        local location, key, copyBusy = FindBagCopy(target, usedCells, watch.lockedCells);
         if location then
             return EquipFromBag(slotId, target, location, key);
         end
@@ -1450,22 +1635,38 @@ local function EquipSetPass(session)
         return SLOT_MISSING;
     end
 
+    -- outcome, number of slots left for the next pass, and what to wait for before that pass (see AwaitLanding)
+    local function EndPass(outcome)
+        for slotId in pairs(touched) do
+            watch.slots[slotId] = equipped[slotId];
+            switchEchoSlots[slotId] = equipped[slotId];
+        end
+        for _, cells in ipairs({usedCells, session.usedBankCells}) do
+            for key, location in pairs(cells) do
+                if type(location) == "table" then
+                    watch.cells[key] = location;
+                end
+            end
+        end
+        return outcome, pending, watch;
+    end
+
     for _, slotId in ipairs(c:GetSlotSwitchOrder(setName)) do
         local target = targets[slotId];
         if target ~= nil and not IsOnTarget(slotId, target) then
             if c:IsInCombat() and (c.combatEquipBlocked or not COMBAT_EQUIP_SLOTS[slotId]) then
-                return PASS_COMBAT, pending;
+                return EndPass(PASS_COMBAT);
             end
             if c:IsCastingSpell() then
-                return PASS_ACTION, pending;
+                return EndPass(PASS_ACTION);
             end
 
             local result = ProcessSlot(slotId, target);
             if actionBlocked then
-                return PASS_BLOCKED, pending;
+                return EndPass(PASS_BLOCKED);
             end
             if result == SLOT_ERROR then
-                return PASS_ERROR, pending;
+                return EndPass(PASS_ERROR);
             elseif result == SLOT_WAIT or result == SLOT_FAILED then
                 pending = pending + 1;
             elseif result == SLOT_OK then
@@ -1474,10 +1675,10 @@ local function EquipSetPass(session)
         end
     end
 
-    return PASS_DONE, pending;
+    return EndPass(PASS_DONE);
 end
 
-local function InterruptSwitch(session, outcome)
+local function InterruptSwitch(session, outcome, watch)
     local cause, notify = QUEUE_CAUSE_COMBAT, nil;
     if outcome == PASS_BLOCKED then
         actionBlocked = false;
@@ -1500,8 +1701,9 @@ local function InterruptSwitch(session, outcome)
         [c.SWITCHARG_NOTIFY] = notify
     });
 
-    -- the switching flag stays until the equip events of the actions issued so far have arrived (no auto-save of them)
-    C_Timer.After(c:GetHomeLatency(500 + SwitchDelay()) / 1000, function()
+    -- the switching flag stays until the actions issued so far have landed (no auto-save of their equip events)
+    watch.final = true;
+    AwaitLanding(watch, FINISH_FALLBACK_MS + SwitchDelay(), function()
         c:SetSwitching();
         if not c:IsInCombat() then
             c:UnlockUI();
@@ -1515,10 +1717,10 @@ end
 
 RunSwitchPass = function(session)
     session.pass = session.pass + 1;
-    local outcome, pending = EquipSetPass(session);
+    local outcome, pending, watch = EquipSetPass(session);
 
     if outcome == PASS_COMBAT or outcome == PASS_ACTION or outcome == PASS_BLOCKED then
-        InterruptSwitch(session, outcome);
+        InterruptSwitch(session, outcome, watch);
         return;
     end
 
@@ -1526,10 +1728,17 @@ RunSwitchPass = function(session)
         notifyInventoryError = true;
     elseif pending > 0 then
         if session.pass < MAX_SWITCH_PASSES then
-            C_Timer.After(c:GetHomeLatency(100 + SwitchDelay()) / 1000, function()
+            local function NextPass()
                 session.bagSpaceCache = c:GetBagSpace();
                 RunSwitchPass(session);
-            end);
+            end
+            if IsWatchEmpty(watch) then
+                -- nothing moved and nothing locked (e.g. a refused move): retry after the delay
+                C_Timer.After(c:GetHomeLatency(PASS_FALLBACK_MS + SwitchDelay()) / 1000, NextPass);
+            else
+                -- as soon as the server has answered this pass
+                AwaitLanding(watch, PASS_FALLBACK_MS + SwitchDelay(), NextPass);
+            end
             return;
         end
         notifyInventoryError = true;
@@ -1541,7 +1750,7 @@ RunSwitchPass = function(session)
         c:SaveCurrentSetName(c:LoadPreviousSetName());
     end
 
-    c:FinishSwitch(session.args);
+    c:FinishSwitch(session.args, watch);
 end
 
 function c:SwitchToSet(switchArgs)

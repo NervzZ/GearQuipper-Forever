@@ -7,7 +7,8 @@
 -- UI_ERROR_MESSAGE and leaves the cursor as it was.
 -- H.latency = 0 (default): the server applies a request immediately. H.latency > 0: it applies it that many
 -- seconds later; meanwhile both locations stay locked and reads (GetInventoryItemLink, bag scans) show the old
--- state, which is what an addon issuing many equips in one frame really sees.
+-- state, which is what an addon issuing many equips in one frame really sees. H.replySpread > 0 spaces the replies
+-- to requests sent together that many seconds apart (they then land over several frames).
 -- Events (PLAYER_EQUIPMENT_CHANGED, UNIT_INVENTORY_CHANGED, BAG_UPDATE, ITEM_LOCK_CHANGED/ITEM_LOCKED/ITEM_UNLOCKED,
 -- UI_ERROR_MESSAGE) are queued and dispatched on the next frame; BAG_UPDATE_DELAYED one frame later.
 local H = ...;
@@ -20,6 +21,7 @@ local cursor = nil;   -- {inst, from = location}
 H.inv, H.bags = inv, bags;
 H.ammo = nil;         -- item id referenced by the ammo slot (ammo stays in the bags, as in vanilla)
 H.latency = 0;
+H.replySpread = 0;    -- latency mode: seconds between the replies to requests still pending (0 = one batch)
 H.blockCombatPickups = false;
 H.blocked = {};       -- ADDON_ACTION_BLOCKED log
 H.uiErrors = {};      -- UI_ERROR_MESSAGE log
@@ -172,6 +174,11 @@ local function commit(op)
             lock(loc);
         end
         op.dueMs = H.nowMs + math.floor(H.latency * 1000 + 0.5);
+        local last = pending[#pending];
+        if H.replySpread > 0 and last then
+            -- the server answers one request after the other, the replies arrive over several frames
+            op.dueMs = math.max(op.dueMs, last.dueMs + math.floor(H.replySpread * 1000 + 0.5));
+        end
         pending[#pending + 1] = op;
     else
         apply(op);
