@@ -9,6 +9,7 @@ local FIELD_CURRENTSET = "FIELD_CURRENTSET";
 local FIELD_LASTSET = "FIELD_LASTSET";
 local FIELD_SETS = "FIELD_SETS";
 local FIELD_EVENTS = "FIELD_EVENTS";
+local FIELD_EVENTS_ENABLED = "FIELD_EVENTS_ENABLED";
 local FIELD_INVENTORY = "FIELD_INVENTORY";
 local FIELD_BANK = "FIELD_BANK";
 local FIELD_IGNOREDSLOTS = "FIELD_IGNOREDSLOTS";
@@ -17,22 +18,17 @@ local FIELD_COMPARISON_SETNAME = "FIELD_COMPARISON_SETNAME";
 -- set fields
 local FIELD_SHOWCLOAK = "FIELD_SHOWCLOAK";
 local FIELD_SHOWHELMET = "FIELD_SHOWHELMET";
-local FIELD_EVENTS_ENABLED = "FIELD_EVENTS_ENABLED";
 local FIELD_SLOTS = "FIELD_SLOTS";
 local FIELD_SLOTSTATES = "FIELD_SLOTSTATES";
-local FIELD_ACTIONSLOTS = "FIELD_ACTIONSLOTS";
-local FIELD_KEYBINDINGS = "FIELD_KEYBINDINGS";
 
 -- additional set fields
 local FIELD_AFFECTS_HELMET = "FIELD_AFFECTS_HELMET";
 local FIELD_AFFECTS_CLOAK = "FIELD_AFFECTS_CLOAK";
 
-local FIELD_OPT_ACTIONSLOTS = "FIELD_OPT_ACTIONSLOTS";
 local FIELD_OPT_PARTIAL = "FIELD_OPT_PARTIAL";
 
--- scripts
-local FIELD_SCRIPTS = "FIELD_SCRIPTS";
-local FIELD_SCRIPTS_ID = "FIELD_SCRIPTS_ID";
+-- set fields written by GearQuipper v54 for features that do not exist on Forever (action bars, key bindings)
+local OBSOLETE_SET_FIELDS = {"FIELD_ACTIONSLOTS", "FIELD_OPT_ACTIONSLOTS", "FIELD_KEYBINDINGS"};
 
 -- misc fields
 c.FIELD_ID = "FIELD_ID";
@@ -42,8 +38,6 @@ c.FIELD_SUBSUBTYPE = "FIELD_SUBSUBTYPE"; -- transient
 c.FIELD_NAME = "FIELD_NAME";
 c.FIELD_PVE = "FIELD_PVE";
 c.FIELD_PVP = "FIELD_PVP";
-c.FIELD_TEXT = "FIELD_TEXT";
-c.FIELD_OK = "FIELD_OK";
 c.FIELD_ENABLED = "FIELD_ENABLED";
 
 function c:InitDatabase()
@@ -60,8 +54,19 @@ function c:InitDatabase()
     GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_IGNOREDSLOTS] =
         GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_IGNOREDSLOTS] or {};
 
-    GQ_AUX[FIELD_SCRIPTS] = GQ_AUX[FIELD_SCRIPTS] or {};
-    GQ_AUX[FIELD_SCRIPTS_ID] = GQ_AUX[FIELD_SCRIPTS_ID] or 1;
+    -- every set needs its slot tables; sets saved by v54 may also carry data of dropped features
+    local sets = GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS];
+    for setName, set in pairs(sets) do
+        if type(set) ~= "table" then
+            sets[setName] = nil;
+        else
+            set[FIELD_SLOTS] = set[FIELD_SLOTS] or {};
+            set[FIELD_SLOTSTATES] = set[FIELD_SLOTSTATES] or {};
+            for _, field in ipairs(OBSOLETE_SET_FIELDS) do
+                set[field] = nil;
+            end
+        end
+    end
 end
 
 ----- [ sets ] -----
@@ -108,8 +113,6 @@ function c:SaveSet(setName, notifyInChat)
             GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_SLOTS] or {};
         GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_SLOTSTATES] =
             GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_SLOTSTATES] or {};
-        GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS] =
-            GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS] or {};
 
         for slotId, slotName in pairs(c:GetSlotInfo()) do
             local slotState = c:LoadSlotState(slotId, setName);
@@ -119,19 +122,12 @@ function c:SaveSet(setName, notifyInChat)
         end
 
         if setName ~= c.KEYWORD_PREVIOUSEQUIPMENT then
-            if GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_OPT_ACTIONSLOTS] == nil then
-                GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_OPT_ACTIONSLOTS] = true;
-            end
             if GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_OPT_PARTIAL] == nil then
                 GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_OPT_PARTIAL] = false;
             end
 
             c:SaveCloakAndHelmet(setName, notifyInChat);
             c:SaveCurrentSetName(setName);
-
-            if c:LoadActionSlotsConditionsMet(setName) then
-                c:SaveActionConfiguration(setName, notifyInChat);
-            end
 
             c:RefreshSetList(setName);
             c:SetPaperDollLabelText();
@@ -140,12 +136,9 @@ function c:SaveSet(setName, notifyInChat)
                 c:Println(c:GetText("Set \"%s\" has been saved.", setName));
             end
         else
-            GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_OPT_ACTIONSLOTS] = true;
             GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_OPT_PARTIAL] = false;
-            c:SaveActionConfiguration(setName, false);
         end
 
-        -- c:SaveKeyBindings(setName, notify);
         c:NotifyEventListeners(GQ_EVENT_SET_SAVED, setName);
     end
 end
@@ -162,7 +155,7 @@ function c:LoadSet(setName)
 end
 
 function c:CreateDefaultSet()
-    if table.getn(c:LoadSetNames()) == 0 then
+    if #c:LoadSetNames() == 0 then
         c:SaveSet(DEFAULT, false);
     end
 end
@@ -181,9 +174,12 @@ function c:RemoveSet(setName)
     if c:LoadCurrentSetName() == setName then
         c:SaveCurrentSetName(nil);
     end
-    for eventName, bindingName in pairs(c:LoadEventBindings()) do
-        if setName == bindingName then
-            c:SaveEventBinding(eventName, nil);
+
+    -- remove the event bindings that switch to this set (backwards: DeleteEventBinding shifts the indices)
+    local bindings = c:LoadEventBindings();
+    for index = #bindings, 1, -1 do
+        if bindings[index][c.FIELD_NAME] == setName then
+            c:DeleteEventBinding(index);
         end
     end
 
@@ -204,7 +200,7 @@ function c:SaveSlot(slotId, setName, notifyInChat, itemString)
         notifyInChat = true;
     end
 
-    if setName then
+    if setName and GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName] then
         itemString = itemString or c:GetItemString(slotId);
         if GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_SLOTS][slotId] ~= itemString then
             GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_SLOTS][slotId] = itemString;
@@ -236,7 +232,7 @@ end
 function c:SaveSlotState(slotId, active, notify, setName)
     c:DebugPrint("SaveSlotState", slotId, active, notify, setName);
     setName = setName or c:LoadCurrentSetName();
-    if setName then
+    if setName and GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName] then
         GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_SLOTSTATES] =
             GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_SLOTSTATES] or {};
         if GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_SLOTSTATES][slotId] ~= active then
@@ -252,290 +248,12 @@ function c:SaveSlotState(slotId, active, notify, setName)
     end
 end
 
-function c:LevelUp(newLevel)
-    c:DebugPrint("LevelUp", newLevel);
-    -- itemStrings contain the level at which they were created, which makes an update neccessary if there has been a lvlup
-    if newLevel then
-        -- sets
-        for setName in pairs(GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS]) do
-            for slotId, slotName in pairs(c:GetSlotInfo()) do
-                if slotId > 0 then
-                    local itemString = c:LoadSlot(slotId, setName);
-                    if not c:IsEmpty(itemString) then
-                        local stringValues = {strsplit(":", itemString)};
-                        stringValues[10] = newLevel;
-                        c:SaveSlot(slotId, setName, false, table.concat(stringValues, ":"));
-                    end
-                end
-            end
-        end
-
-        -- last inventory locations
-        local copy = c:Deepcopy(GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_INVENTORY]);
-        for itemString, values in pairs(copy) do
-            -- remove old value
-            GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_INVENTORY][itemString] = nil;
-
-            -- build new value
-            local stringValues = {strsplit(":", itemString)};
-            stringValues[10] = newLevel;
-            local newItemString = table.concat(stringValues, ":");
-            if newItemString then
-                -- set new value
-                GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_INVENTORY][table.concat(stringValues, ":")] = values;
-            end
-        end
-    end
-end
-
 function c:ReplaceItemStringInAllSets(oldString, newString, notify)
     c:DebugPrint("ReplaceItemStringInAllSets", oldString, newString, notify);
     for _, setName in ipairs(c:LoadSetNames()) do
         for slotId, itemString in pairs(c:LoadSet(setName)) do
             if itemString == oldString and (not c:LoadPartialOption(setName) or c:LoadSlotState(slotId, setName)) then
                 c:SaveSlot(slotId, setName, notify, newString);
-            end
-        end
-    end
-end
-
------ [ actions ] -----
-
-function c:SaveActionConfiguration(setName, notifyInChat)
-    c:DebugPrint("SaveActionConfiguration", setName, notifyInChat);
-    setName = setName or c:LoadCurrentSetName();
-    if setName then
-        GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName] =
-            GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName] or {};
-        GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS] =
-            GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS] or {};
-
-        for slotId = 1, 120 do
-            c:SaveActionSlot(slotId, setName, notifyInChat);
-        end
-
-        c:NotifyEventListeners(GQ_EVENT_ACTIONSLOT_SET_SAVED, setName);
-        return true;
-    end
-end
-
-function c:SaveActionSlot(slotId, setName, notifyInChat, realmName, charName)
-    --	c:DebugPrint("SaveActionSlot", slotId, setName, notify, realmName, charName);
-    slotId = tonumber(slotId);
-    if slotId then
-        realmName = realmName or c:GetRealmName();
-        charName = charName or c:GetCharName();
-        setName = setName or c:LoadCurrentSetName();
-        if setName then
-            if notifyInChat == nil then
-                notifyInChat = true;
-            end
-
-            GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName] =
-                GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName] or {};
-            GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS] =
-                GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS] or {};
-            local entry = GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS][slotId];
-
-            if not c:IsSameAction(slotId, entry) then
-                if HasAction(slotId) then
-                    local actionType, id, subType = GetActionInfo(slotId);
-
-                    local newEntry = {};
-                    newEntry[c.FIELD_TYPE] = actionType;
-                    if actionType == "macro" then
-                        newEntry[c.FIELD_ID] = GetMacroInfo(id);
-                    else
-                        newEntry[c.FIELD_ID] = id;
-                    end
-                    newEntry[c.FIELD_SUBTYPE] = subType;
-
-                    GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS][slotId] =
-                        newEntry;
-                else
-                    GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS][slotId] =
-                        c.VALUE_NONE;
-                end
-
-                if notifyInChat then
-                    local actionItemName = EMPTY;
-
-                    if GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS][slotId] ~=
-                        c.VALUE_NONE then
-                        local aType, id, sType =
-                            GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS][slotId][c.FIELD_TYPE],
-                            GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS][slotId][c.FIELD_ID],
-                            GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS][slotId][c.FIELD_SUBTYPE];
-
-                        if aType == "spell" then
-                            actionItemName = c:GetSpellLink(id);
-                            local rank = c:GetSpellSubText(id);
-                            if rank and rank ~= "" then
-                                actionItemName = string.format("%s (%s)", actionItemName, rank);
-                            end
-                        elseif aType == "item" then
-                            actionItemName = c:GetItemLink(id);
-                        elseif aType == "macro" then
-                            actionItemName = c:GetText("Macro \"%s\"", id);
-                        elseif aType == "companion" then
-                            actionItemName = c:GetSpellLink(id);
-                        end
-                    end
-                    c:NotifyInChat(c:GetText("<%s> Saved action slot %s: %s", setName, slotId, actionItemName));
-                end
-
-                c:NotifyEventListeners(GQ_EVENT_ACTIONSLOT_SAVED, setName, slotId);
-                return true;
-            end
-        end
-    end
-end
-
-function c:LoadActionSlot(slotId, setName)
-    setName = setName or c:LoadCurrentSetName();
-    if setName and GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName] then
-        GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS] =
-            GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS] or {}; -- legacy compatibility issue
-        return GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS][slotId];
-    end
-end
-
-function c:LoadActionSlots(setName)
-    setName = setName or c:LoadCurrentSetName();
-    if setName and GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName] then
-        return GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_ACTIONSLOTS];
-    end
-end
-
-local macros;
-function c:GetMacros(refresh)
-    c:DebugPrint("GetMacros");
-    if not macros or refresh then
-        macros = {
-            ["all"] = {},
-            ["global"] = {},
-            ["char"] = {}
-        }
-
-        local numGlobal, numLocal = GetNumMacros(); -- 1-120: global; 121-138: local
-        for id = 1, numGlobal do
-            local name, iconTexture, body, isLocal = GetMacroInfo(id);
-            table.insert(macros["all"], name);
-            table.insert(macros["global"], name);
-        end
-
-        for id = 1, numLocal do
-            id = id + 120;
-            local name, iconTexture, body, isLocal = GetMacroInfo(id);
-            table.insert(macros["all"], name);
-            table.insert(macros["char"], name);
-        end
-    end
-    return macros;
-end
-
-function c:ProcessMacroUpdate()
-    c:DebugPrint("ProcessMacroUpdate");
-    if c.macroAction == c.MACROACTION_EDIT or c.macroAction == c.MACROACTION_DELETE then
-        local oldMacrosAll, newMacrosAll, oldMacros, newMacros, realmName, charName = c:GetMacros(), c:GetMacros(true);
-        if c.macroAction[c.FIELD_TYPE] == 1 then
-            oldMacros = oldMacrosAll["global"];
-            newMacros = newMacrosAll["global"];
-        elseif c.macroAction[c.FIELD_TYPE] == 2 then
-            oldMacros = oldMacrosAll["char"];
-            newMacros = newMacrosAll["char"];
-            realmName = c:GetRealmName();
-            charName = c:GetCharName();
-        end
-
-        local oldName, newName;
-        if oldMacros and newMacros then
-            if c.macroAction[c.FIELD_NAME] == c.MACROACTION_EDIT then
-                oldName, newName = c:FindRenamedMacro(oldMacros, newMacros);
-            elseif c.macroAction[c.FIELD_NAME] == c.MACROACTION_DELETE then
-                oldName = GetMacroInfo(c.macroAction[c.FIELD_ID]);
-            end
-            c:UpdateMacro(oldName, newName, realmName, charName);
-        end
-
-        c.macroAction = nil;
-    end
-end
-
-function c:FindRenamedMacro(oldMacros, newMacros)
-    c:DebugPrint("FindRenamedMacro");
-    for id, name in ipairs(oldMacros) do
-        if not c:TableContains(newMacros, name) then
-            for newId, newName in ipairs(newMacros) do
-                if not c:TableContains(oldMacros, newName) then
-                    return name, newName;
-                end
-            end
-        end
-    end
-end
-
-function c:UpdateMacro(oldName, newName, realmName, charName)
-    c:DebugPrint("UpdateMacro", oldName, newName, realmName, charName);
-    if not realmName or not charName then
-        -- global macros
-        for realmName in pairs(GQ_DATA) do
-            for charName in pairs(GQ_DATA[realmName]) do
-                c:UpdateMacro(oldName, newName, realmName, charName);
-            end
-        end
-    else
-        -- local macro (character macro)
-        for setName in pairs(GQ_DATA[realmName][charName][FIELD_SETS]) do
-            for slotId, entry in ipairs(GQ_DATA[realmName][charName][FIELD_SETS][setName][FIELD_ACTIONSLOTS]) do
-                if entry and entry[c.FIELD_TYPE] == "macro" and entry[c.FIELD_ID] == oldName then
-                    if newName then
-                        GQ_DATA[realmName][charName][FIELD_SETS][setName][FIELD_ACTIONSLOTS][slotId][c.FIELD_ID] =
-                            newName;
-                    else
-                        GQ_DATA[realmName][charName][FIELD_SETS][setName][FIELD_ACTIONSLOTS][slotId] = c.VALUE_NONE;
-                    end
-                end
-            end
-        end
-    end
-end
-
-function c:UprankSpellOnActionSlots(targetSpellId)
-    if GQ_OPTIONS[c.OPT_AUTOUPRANKSPELLS] and targetSpellId then
-        -- local targetSpellId = c:GetSpellId(spellName, targetSpellRank);
-        local upgradableSpellIds;
-        c:DebugPrint("SpellId:", targetSpellId);
-        if GQ_OPTIONS[c.OPT_AUTOUPRANKSPELLS_ALLRANKS] then
-            -- all lower ranks
-            upgradableSpellIds = c:GetUprankableSpellIds(targetSpellId);
-        else
-            -- only -1 rank
-            upgradableSpellIds = {c:GetLowerRankSpellId(targetSpellId)};
-        end
-
-        c:DebugPrint("Upgradable ids:");
-        if c.debugMode then
-            c:DumpTable(upgradableSpellIds);
-        end
-
-        local currentSetName = c:LoadCurrentSetName();
-        for _, setName in ipairs(c:LoadSetNames()) do
-            if c:LoadActionSlotsConditionsMet(setName) then
-                for slotId, slotInfo in pairs(c:LoadActionSlots(setName)) do
-                    if slotInfo and slotInfo ~= c.VALUE_NONE and
-                        c:TableContains(upgradableSpellIds, slotInfo[c.FIELD_ID]) then
-                        c:SaveActionSlot(slotId, setName, true);
-
-                        if setName == currentSetName then
-                            ClearCursor();
-                            PickupSpell(targetSpellId);
-                            PlaceAction(slotId);
-                            ClearCursor();
-                            c:HighlightActionSlot(slotId);
-                        end
-                    end
-                end
             end
         end
     end
@@ -557,14 +275,9 @@ function c:SaveEventBinding(binding, index)
 
     -- notification
     local event = c:GetEvents()[binding[c.FIELD_TYPE]];
-    if event and binding[c.FIELD_SUBTYPE] then
-        if binding[c.FIELD_SUBTYPE]["mapID"] then
-            -- zone
-            event = event .. " (" .. c:GetZoneDisplayName(binding[c.FIELD_SUBTYPE]["mapID"]) .. ")";
-        elseif binding[c.FIELD_SUBTYPE][c.FIELD_NAME] then
-            -- script
-            event = event .. " (" .. binding[c.FIELD_SUBTYPE][c.FIELD_NAME] .. ")";
-        end
+    if event and binding[c.FIELD_SUBTYPE] and binding[c.FIELD_SUBTYPE]["mapID"] then
+        -- zone
+        event = event .. " (" .. c:GetZoneDisplayName(binding[c.FIELD_SUBTYPE]["mapID"]) .. ")";
     end
 
     local setName = binding[c.FIELD_NAME];
@@ -606,14 +319,9 @@ function c:DeleteEventBinding(index)
 
         -- notification
         local event = c:GetEvents()[binding[c.FIELD_TYPE]];
-        if event and binding[c.FIELD_SUBTYPE] then
-            if binding[c.FIELD_SUBTYPE]["mapID"] then
-                -- zone
-                event = event .. " (" .. c:GetZoneDisplayName(binding[c.FIELD_SUBTYPE]["mapID"]) .. ")";
-            elseif binding[c.FIELD_SUBTYPE][c.FIELD_NAME] then
-                -- script
-                event = event .. " (" .. binding[c.FIELD_SUBTYPE][c.FIELD_NAME] .. ")";
-            end
+        if event and binding[c.FIELD_SUBTYPE] and binding[c.FIELD_SUBTYPE]["mapID"] then
+            -- zone
+            event = event .. " (" .. c:GetZoneDisplayName(binding[c.FIELD_SUBTYPE]["mapID"]) .. ")";
         end
 
         local setName = binding[c.FIELD_NAME];
@@ -665,24 +373,6 @@ function c:DisableBindings(setName)
     SetBindingEnabled(setName, false);
 end
 
------ [ key bindings ] -----
-function c:SaveKeyBindings(setName, notify)
-    c:DebugPrint("SaveKeyBindings", setName, notify);
-    if setName then
-        local keyBindings = c:GetCurrentKeyBindings();
-        GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_KEYBINDINGS] = keyBindings;
-    end
-end
-
-function c:LoadKeyBindings(setName)
-    c:DebugPrint("LoadKeyBindings", setName);
-    setName = setName or c:LoadCurrentSetName();
-    local keyBindings = GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_KEYBINDINGS];
-    if keyBindings then
-        c:SetKeyBindings(keyBindings);
-    end
-end
-
 ----- [ other ] -----
 
 function c:SaveComparisonSetName(setName)
@@ -700,7 +390,7 @@ function c:SaveCloakAndHelmet(setName, notify)
         notify = true;
     end
 
-    if setName then
+    if setName and GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName] then
         if ShowingHelm() ~= GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_SHOWHELMET] then
             GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_SHOWHELMET] = ShowingHelm();
             if notify then
@@ -813,20 +503,6 @@ function c:SavePartialOption(setName, value)
     end
 end
 
-function c:LoadActionSlotsOption(setName)
-    setName = setName or c:LoadCurrentSetName();
-    if setName and GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName] then
-        return GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_OPT_ACTIONSLOTS];
-    end
-end
-
-function c:SaveActionSlotsOption(setName, value)
-    c:DebugPrint("SaveActionSlotsOption", setName, value);
-    if setName and GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName] then
-        GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName][FIELD_OPT_ACTIONSLOTS] = value;
-    end
-end
-
 function c:SaveLastBagLocation(itemString, bagId, slotId)
     c:DebugPrint("SaveLastBagLocation", itemString, bagId, slotId);
     if itemString and bagId and slotId then
@@ -897,91 +573,4 @@ end
 function c:ResetIgnoredSlots()
     c:DebugPrint("ResetIgnoredSlots");
     GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_IGNOREDSLOTS] = {};
-end
-
------ [ scripts ] -----
-
-function c:LoadScriptNames(distinct)
-    local scriptNames = {};
-    for scriptId, script in pairs(GQ_AUX[FIELD_SCRIPTS]) do
-        if not distinct or not tContains(scriptNames, script[c.FIELD_NAME]) then
-            table.insert(scriptNames, script[c.FIELD_NAME]);
-        end
-    end
-
-    table.sort(scriptNames);
-    return scriptNames;
-end
-
-function c:LoadScripts()
-    return GQ_AUX[FIELD_SCRIPTS];
-end
-
-function c:LoadScript(scriptId)
-    if scriptId then
-        return GQ_AUX[FIELD_SCRIPTS][scriptId];
-    end
-end
-
-function c:SaveScriptStatus(script, newStatus)
-    c:DebugPrint("SaveScriptStatus", script, newStatus);
-    script[c.FIELD_OK] = newStatus;
-    GQ_AUX[FIELD_SCRIPTS][script[c.FIELD_ID]] = script;
-end
-
-function c:SaveScript(script, newText)
-    c:DebugPrint("SaveScript", script, "[TEXT HIDDEN]");
-    if script[c.FIELD_TEXT] ~= newText then
-        script[c.FIELD_OK] = false;
-    end
-    script[c.FIELD_TEXT] = newText;
-
-    GQ_AUX[FIELD_SCRIPTS][script[c.FIELD_ID]] = script;
-    c:Println(c:GetText("Script saved: %s", script[c.FIELD_NAME]));
-end
-
-function c:NewScript()
-    local scriptNames = c:LoadScriptNames();
-    local number = 1;
-    local newScriptName = c:GetText("New Script %s", number);
-    c:DebugPrint("NewScript", newScriptName);
-
-    -- new name
-    while (tContains(scriptNames, newScriptName)) do
-        number = number + 1;
-        newScriptName = c:GetText("New Script %s", number);
-    end
-
-    -- new id
-    GQ_AUX[FIELD_SCRIPTS_ID] = GQ_AUX[FIELD_SCRIPTS_ID] or 1;
-    GQ_AUX[FIELD_SCRIPTS_ID] = GQ_AUX[FIELD_SCRIPTS_ID] + 1;
-    local nextId = GQ_AUX[FIELD_SCRIPTS_ID];
-
-    local newScript = {};
-    newScript[c.FIELD_ID] = nextId;
-    newScript[c.FIELD_NAME] = newScriptName;
-    newScript[c.FIELD_TEXT] = "print(\"Hello World\")";
-
-    GQ_AUX[FIELD_SCRIPTS][nextId] = newScript;
-    return newScript;
-end
-
-function c:DeleteScript(script)
-    c:DebugPrint("DeleteScript", script);
-    -- delete bindings
-    local filter = {
-        [c.FIELD_TYPE] = c.EVENT_CUSTOMSCRIPT
-    };
-    local setBindings = c:LoadEventBindings(filter);
-    if setBindings then
-        for index, binding in pairs(setBindings) do
-            if binding[c.FIELD_SUBTYPE] and binding[c.FIELD_SUBTYPE][c.FIELD_ID] and
-                binding[c.FIELD_SUBTYPE][c.FIELD_ID] == script[c.FIELD_ID] then
-                c:DeleteEventBinding(index);
-            end
-        end
-    end
-
-    -- delete script
-    GQ_AUX[FIELD_SCRIPTS][script[c.FIELD_ID]] = nil;
 end

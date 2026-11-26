@@ -9,7 +9,6 @@ local L = gearquipper.localizations["frFR"];
 -- P4nd0ux
 -- xingudi
 
-L["<%s> Saved action slot %s: %s"]                                                                      = "<%s>  Emplacement d'action enregistré %s: %s";
 L["<%s> Saved slot %s (%s): %s"]                                                                        = "<%s> Emplacement enregistré %s (%s): %s";
 
 L["Add set..."]                                                                                         = "Ajouter un ensemble...";
@@ -21,7 +20,6 @@ L["Enter a name for this set:"]                                                 
 L["Expected Item:"]                                                                                     = "Objet attendu:";
 L["Highlight switched slots"]                                                                           = "Mettre en évidence les emplacements échangés";
 L["Invalid set name: \"%s\". Set names must [1] not be empty, [2] be unique (case insensitive) and [3] not contain \"$\" (reserved)."] = "Nom d'ensemble non valide: \"%s\". Les noms d'ensemble ne doivent pas [1] être vides, [2] être uniques (ne respectent pas la casse) et [3] ne pas contenir \"$\" (réservé).";
-L["Macro \"%s\""]                                                                                       = "Macro \"%s\"";
 L["Macro warning: There is no set named \"%s\"."]                                                       = "Avertissement Macro: aucun ensemble nommé \"%s\".";
 L["Not enough bag space. Switching aborted."]                                                           = "Plus de place dans les sacs. Changement annulé.";
 L["Not enough bag space. Current space: %s, needed: %s"]                                                = "Plus de place dans les sacs. Places disponibles : %s, Place nécessaire : %s";

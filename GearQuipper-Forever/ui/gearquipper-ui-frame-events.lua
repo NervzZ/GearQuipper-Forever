@@ -5,7 +5,7 @@ local e;
 local function HasEventSubType(value)
     return value == c.EVENT_ZONE_ENTER or value == c.EVENT_ZONE_LEAVE or value == c.EVENT_SHAPESHIFT_IN or value ==
                c.EVENT_SHAPESHIFT_OUT or value == c.EVENT_AURA_CHANGED or value == c.EVENT_STANCE_CHANGED or value ==
-               c.EVENT_PRESENCE_CHANGED or value == c.EVENT_TALENTS_CHANGED or value == c.EVENT_CUSTOMSCRIPT
+               c.EVENT_TALENTS_CHANGED
 end
 
 function GqUiFrameEvents_OnShow(self)
@@ -37,11 +37,6 @@ function GqUiFrameEvents_OnShow(self)
                         end
                     end
                 end);
-
-                local S = c:GetElvUiSkinModule();
-                if S then
-                    S:HandleDropDownBox(e.cbEventType);
-                end
             end
             e.cbEventType:Show();
             UIDropDownMenu_SetText(e.cbEventType, c:GetText("on < choose event >"));
@@ -54,15 +49,12 @@ function GqUiFrameEvents_OnShow(self)
 
             e:HideCbEventSubType();
             e:HideCbEventSubSubType();
-            e:HideSearchBoxEventSubType();
 
             if HasEventSubType(self.value) then
                 e:ShowCbEventSubType();
-                -- elseif self.value == c.EVENT_SPELLCAST_START or self.value == c.EVENT_SPELLCAST_SUCCEED then
-                --	e:ShowSearchboxEventSubType();
             elseif self.value == c.EVENT_COMBAT_ENTER then
                 GqUiFrameEventsWarningLabelFontString:SetText(c:GetText(
-                    "WARNING! Switching will fail if target set does not match the following conditions:\n- does not affect action slots\n- is partial with only weapon slots enabled"));
+                    "WARNING! Switching will fail if target set does not match the following conditions:\n- is partial with only weapon slots enabled"));
             end
 
             e.newBindingValues[c.FIELD_SUBTYPE] = nil;
@@ -70,7 +62,7 @@ function GqUiFrameEvents_OnShow(self)
             GqUiFrameEvents_BtnApply:SetEnabled(e:CheckValues());
         end
 
-        -- event subtype (combobox or editbox)
+        -- event subtype (combobox)
         function e:ShowCbEventSubType()
             if not e.cbEventSubType then
                 local info = UIDropDownMenu_CreateInfo();
@@ -88,14 +80,7 @@ function GqUiFrameEvents_OnShow(self)
                     end;
 
                     if (level or 1) == 1 then
-                        if e.newBindingValues[c.FIELD_TYPE] == c.EVENT_CUSTOMSCRIPT then
-                            -- custom scripts
-                            for scriptId, script in pairs(c:LoadScripts()) do
-                                info.text = script[c.FIELD_NAME];
-                                info.value = script;
-                                UIDropDownMenu_AddButton(info);
-                            end
-                        elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_AURA_CHANGED then
+                        if e.newBindingValues[c.FIELD_TYPE] == c.EVENT_AURA_CHANGED then
                             -- paladin aura
                             for _, spellDisplayName in ipairs(c:GetPaladinAurasSorted()) do
                                 info.text = spellDisplayName;
@@ -125,23 +110,8 @@ function GqUiFrameEvents_OnShow(self)
                                 end
                                 UIDropDownMenu_AddButton(info);
                             end
-                        elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_PRESENCE_CHANGED then
-                            -- deathknight presence
-                            for _, spellDisplayName in ipairs(c:GetDeathKnightPresencesSorted()) do
-                                info.text = spellDisplayName;
-                                for spellId, spellName in pairs(c:GetDeathKnightPresences()) do
-                                    if spellName == spellDisplayName then
-                                        info.value = {
-                                            name = spellDisplayName,
-                                            spellId = spellId
-                                        };
-                                        break
-                                    end
-                                end
-                                UIDropDownMenu_AddButton(info);
-                            end
                         elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_TALENTS_CHANGED then
-                            -- talents (dual spec)
+                            -- talents (spec group 1 / 2)
                             for _, talentSpecName in ipairs(c:GetTalentSpecializationsSorted()) do
                                 info.text = talentSpecName;
                                 for specId, tName in pairs(c:GetTalentSpecializations()) do
@@ -181,32 +151,21 @@ function GqUiFrameEvents_OnShow(self)
                         end
                     end
                 end);
-
-                local S = c:GetElvUiSkinModule();
-                if S then
-                    S:HandleDropDownBox(e.cbEventSubType);
-                end
             end
             e.cbEventSubType:Show();
 
-            if e.newBindingValues[c.FIELD_TYPE] == c.EVENT_CUSTOMSCRIPT then
-                -- custom scripts
-                UIDropDownMenu_SetText(e.cbEventSubType, c:GetText("< choose script >"));
-            elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_AURA_CHANGED then
+            if e.newBindingValues[c.FIELD_TYPE] == c.EVENT_AURA_CHANGED then
                 -- paladin aura
                 UIDropDownMenu_SetText(e.cbEventSubType, c:GetText("< choose aura >"));
             elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_STANCE_CHANGED then
                 -- warrior stance
                 UIDropDownMenu_SetText(e.cbEventSubType, c:GetText("< choose stance >"));
-            elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_PRESENCE_CHANGED then
-                -- deathknight presence
-                UIDropDownMenu_SetText(e.cbEventSubType, c:GetText("< choose presence >"));
             elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_SHAPESHIFT_IN or e.newBindingValues[c.FIELD_TYPE] ==
                 c.EVENT_SHAPESHIFT_OUT then
                 -- druid form
                 UIDropDownMenu_SetText(e.cbEventSubType, c:GetText("< choose form >"));
             elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_TALENTS_CHANGED then
-                -- talent change (dual sppec)
+                -- talents changed (spec group 1 / 2)
                 UIDropDownMenu_SetText(e.cbEventSubType, c:GetText("< choose talents >"));
             else
                 -- zone enter/leave
@@ -222,34 +181,13 @@ function GqUiFrameEvents_OnShow(self)
 
         function e:CbEventSubType_ValueChanged(self)
             e.newBindingValues[c.FIELD_SUBTYPE] = self.value;
+            UIDropDownMenu_SetText(e.cbEventSubType, self.value["name"]);
 
-            if e.newBindingValues[c.FIELD_TYPE] == c.EVENT_CUSTOMSCRIPT then
-                -- custom scripts
-                UIDropDownMenu_SetText(e.cbEventSubType, self.value[c.FIELD_NAME]);
-            elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_AURA_CHANGED then
-                -- paladin aura
-                UIDropDownMenu_SetText(e.cbEventSubType, self.value["name"]);
-            elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_STANCE_CHANGED then
-                -- warrior stance
-                UIDropDownMenu_SetText(e.cbEventSubType, self.value["name"]);
-            elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_PRESENCE_CHANGED then
-                -- deathknight presence
-                UIDropDownMenu_SetText(e.cbEventSubType, self.value["name"]);
-            elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_SHAPESHIFT_IN or e.newBindingValues[c.FIELD_TYPE] ==
-                c.EVENT_SHAPESHIFT_OUT then
-                -- druid form
-                UIDropDownMenu_SetText(e.cbEventSubType, self.value["name"]);
-            elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_TALENTS_CHANGED then
-                -- talents changed (dual spec)
-                UIDropDownMenu_SetText(e.cbEventSubType, self.value["name"]);
-            else
-                -- zone enter/leave
-                UIDropDownMenu_SetText(e.cbEventSubType, self.value["name"]);
-
+            if e.newBindingValues[c.FIELD_TYPE] == c.EVENT_ZONE_ENTER or e.newBindingValues[c.FIELD_TYPE] ==
+                c.EVENT_ZONE_LEAVE then
                 if table.getn(c:GetZoneChildrenSorted(self.value["mapID"])) > 0 then
                     e:ShowCbEventSubSubType();
                 elseif e.cbEventSubSubType then
-                    e.newBindingValues[c.FIELD_SUBSUBTYPE] = nil;
                     e.cbEventSubSubType:Hide();
                 end
             end
@@ -258,46 +196,7 @@ function GqUiFrameEvents_OnShow(self)
             GqUiFrameEvents_BtnApply:SetEnabled(e:CheckValues());
         end
 
-        function e:ShowSearchboxEventSubType()
-            if not e.editBoxEventSubType then
-                e.editBoxEventSubType = CreateFrame("EditBox", "GqUiFrameEvents_EditBoxEventSubType",
-                    GqUiFrameEventsContent, "SearchBoxTemplate");
-                e.editBoxEventSubType:SetPoint("TOPLEFT", 9, -33);
-                e.editBoxEventSubType:SetHeight(20);
-                e.editBoxEventSubType:SetWidth(145);
-                e.editBoxEventSubType:SetScript("OnEnterPressed", function(self)
-                    e:EditBoxEventSubType_EnterPressed(self);
-                end);
-
-                local S = c:GetElvUiSkinModule();
-                if S then
-                    S:HandleDropDownBox(e.editBoxEventSubType);
-                end
-            end
-            e.editBoxEventSubType:Show();
-        end
-
-        function e:HideSearchBoxEventSubType()
-            if e.editBoxEventSubType then
-                e.editBoxEventSubType:Hide();
-            end
-        end
-
-        function e:EditBoxEventSubType_EnterPressed(self)
-            local spells, maxResultsExceeded = c:SearchSpells(self:GetText());
-            if spells and table.getn(spells) > 0 then
-                e.spellSearchResults = spells;
-                if maxResultsExceeded then
-                    e:SetErrorMessage(c:GetText("Maximum search results (%s) exceeded.", maxResultsExceeded));
-                end
-                e:ShowCbEventSubSubType();
-            else
-                e.spellSearchResults = nil;
-                e:HideCbEventSubSubType();
-            end
-        end
-
-        -- eventsubsubtype (combobox)
+        -- event subsubtype (combobox, subzone)
         function e:ShowCbEventSubSubType()
             if not e.cbEventSubSubType then
                 local info = UIDropDownMenu_CreateInfo();
@@ -315,53 +214,21 @@ function GqUiFrameEvents_OnShow(self)
                     end;
 
                     if (level or 1) == 1 then
-                        if e.newBindingValues[c.FIELD_TYPE] == c.EVENT_ZONE_ENTER or e.newBindingValues[c.FIELD_TYPE] ==
-                            c.EVENT_ZONE_LEAVE then
+                        if (e.newBindingValues[c.FIELD_TYPE] == c.EVENT_ZONE_ENTER or e.newBindingValues[c.FIELD_TYPE] ==
+                            c.EVENT_ZONE_LEAVE) and e.newBindingValues[c.FIELD_SUBTYPE] then
                             for zoneId, zoneValues in ipairs(c:GetZoneChildrenSorted(
                                 e.newBindingValues[c.FIELD_SUBTYPE]["mapID"])) do
                                 info.text = zoneValues["name"];
                                 info.value = c:Deepcopy(zoneValues);
                                 UIDropDownMenu_AddButton(info);
                             end
-                            -- elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_SPELLCAST_START or e.newBindingValues[c.FIELD_TYPE] == c.EVENT_SPELLCAST_SUCCEED and e.spellSearchResults then
-                            --	for spellId, spell in pairs(e.spellSearchResults) do
-                            --		info.text = spell["name"];
-                            --		info.value = c:Deepcopy(spell);
-                            --		UIDropDownMenu_AddButton(info);
-                            --	end
                         end
                     end
                 end);
-
-                local S = c:GetElvUiSkinModule();
-                if S then
-                    S:HandleDropDownBox(e.cbEventSubSubType);
-                end
             end
 
             e.cbEventSubSubType:Show();
-            if e.newBindingValues[c.FIELD_TYPE] == c.EVENT_ZONE_ENTER or e.newBindingValues[c.FIELD_TYPE] ==
-                c.EVENT_ZONE_LEAVE then
-                UIDropDownMenu_SetText(e.cbEventSubSubType, c:GetText("< subzone (optional) >"));
-            elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_AURA_CHANGED then
-                -- paladin aura
-                UIDropDownMenu_SetText(e.cbEventSubSubType, c:GetText("< choose aura >"));
-            elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_STANCE_CHANGED then
-                -- warrior stance
-                UIDropDownMenu_SetText(e.cbEventSubSubType, c:GetText("< choose stance >"));
-            elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_PRESENCE_CHANGED then
-                -- deathknight presence
-                UIDropDownMenu_SetText(e.cbEventSubSubType, c:GetText("< choose presence >"));
-            elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_SHAPESHIFT_IN or e.newBindingValues[c.FIELD_TYPE] ==
-                c.EVENT_SHAPESHIFT_OUT then
-                -- druid form
-                UIDropDownMenu_SetText(e.cbEventSubSubType, c:GetText("< choose form >"));
-                -- elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_SPELLCAST_START or e.newBindingValues[c.FIELD_TYPE] == c.EVENT_SPELLCAST_SUCCEED then
-                --	UIDropDownMenu_SetText(e.cbEventSubSubType, c:GetText("< choose spell >"));
-            elseif e.newBindingValues[c.FIELD_TYPE] == c.EVENT_TALENTS_CHANGED then
-                -- talents changed (dual spec)
-                UIDropDownMenu_SetText(e.cbEventSubSubType, c:GetText("< choose talents >"));
-            end
+            UIDropDownMenu_SetText(e.cbEventSubSubType, c:GetText("< subzone (optional) >"));
         end
 
         function e:HideCbEventSubSubType()
@@ -409,12 +276,6 @@ function GqUiFrameEvents_OnShow(self)
                         end
                     end
                 end);
-
-                local S = c:GetElvUiSkinModule();
-                if S then
-                    S:HandleDropDownBox(e.cbSetName);
-                    e.cbSetName:SetPoint("TOPRIGHT", -10, -30);
-                end
             end
             e.cbSetName:Show();
             UIDropDownMenu_SetText(e.cbSetName, c:GetText("< choose set >"));
@@ -463,19 +324,7 @@ function GqUiFrameEvents_OnShow(self)
         GqUiFrameEvents_BtnApply:SetText(APPLY);
         GqUiFrameEvents_BtnCancel:SetText(CANCEL);
 
-        GqUiFrameEvents_BtnApply:SetEnabled(false);
         table.insert(UISpecialFrames, GqUiFrameEvents:GetName());
-
-        local S = c:GetElvUiSkinModule();
-        if S then
-            S:HandleFrame(GqUiFrameEvents);
-            GqUiFrameEvents:SetBackdropColor(0, 0, 0, 1);
-            S:HandleCheckBox(GqUiFrameEvents_CbPVE);
-            S:HandleCheckBox(GqUiFrameEvents_CbPVP);
-            S:HandleButton(GqUiFrameEvents_BtnApply);
-            S:HandleButton(GqUiFrameEvents_BtnCancel);
-            GqUiFrameEvents.CloseButton:Hide();
-        end
     end
 
     -- misc stuff
@@ -491,17 +340,14 @@ function GqUiFrameEvents_OnShow(self)
                 return false;
             end
 
-            return (e.newBindingValues[c.FIELD_PVE] or e.newBindingValues[c.FIELD_PVP]) and
-                       e.newBindingValues[c.FIELD_NAME] and e.newBindingValues[c.FIELD_TYPE] and
-                       ((e.newBindingValues[c.FIELD_TYPE] ~= c.EVENT_ZONE_ENTER and e.newBindingValues[c.FIELD_TYPE] ~=
-                           c.EVENT_ZONE_LEAVE and e.newBindingValues[c.FIELD_TYPE] ~= c.EVENT_CUSTOMSCRIPT and
-                           e.newBindingValues[c.FIELD_TYPE] ~= c.EVENT_SHAPESHIFT_IN and
-                           e.newBindingValues[c.FIELD_TYPE] ~= c.EVENT_SHAPESHIFT_OUT and
-                           e.newBindingValues[c.FIELD_TYPE] ~= c.EVENT_AURA_CHANGED and e.newBindingValues[c.FIELD_TYPE] ~=
-                           c.EVENT_STANCE_CHANGED and e.newBindingValues[c.FIELD_TYPE] ~= c.EVENT_PRESENCE_CHANGED and
-                           e.newBindingValues[c.FIELD_TYPE] ~= c.EVENT_TALENTS_CHANGED) or
-                           e.newBindingValues[c.FIELD_SUBTYPE]);
+            -- SetEnabled wants a boolean, the expression below yields tables/strings
+            if (e.newBindingValues[c.FIELD_PVE] or e.newBindingValues[c.FIELD_PVP]) and
+                e.newBindingValues[c.FIELD_NAME] and e.newBindingValues[c.FIELD_TYPE] and
+                (not HasEventSubType(e.newBindingValues[c.FIELD_TYPE]) or e.newBindingValues[c.FIELD_SUBTYPE]) then
+                return true;
+            end
         end
+        return false;
     end
 
     function e:SetErrorMessage(text)
@@ -521,7 +367,6 @@ function GqUiFrameEvents_OnShow(self)
 
     e:HideCbEventSubType();
     e:HideCbEventSubSubType();
-    e:HideSearchBoxEventSubType();
 
     e.newBindingValues = {
         [c.FIELD_PVE] = true,
@@ -534,4 +379,6 @@ function GqUiFrameEvents_OnShow(self)
     GqUiFrameEventsErrorsLabelFontString:SetText();
     GqUiFrameEvents_CbPVE:SetChecked(true);
     GqUiFrameEvents_CbPVP:SetChecked(true);
+    -- GQ only disabled Apply on the first open; after a successful Apply it reopened enabled with nothing chosen.
+    GqUiFrameEvents_BtnApply:SetEnabled(false);
 end

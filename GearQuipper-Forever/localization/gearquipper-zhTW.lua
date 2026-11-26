@@ -8,7 +8,6 @@ local L = gearquipper.localizations["zhTW"];
 -- translation by:
 -- jedivank
 
-L["<%s> Saved action slot %s: %s"]                                                                      = "<%s> 已儲存動作 %s: %s";
 L["<%s> Saved slot %s (%s): %s"]                                                                        = "<%s> 已儲存 %s  (%s): %s";
 
 L["Add set..."]                                                                                         = "新增套件...";
@@ -20,7 +19,6 @@ L["Enter a name for this set:"]                                                 
 L["Expected Item:"]                                                                                     = "請輸入套件名稱:";
 L["Highlight switched slots"]                                                                           = "高亮度標示已更改的裝備";
 L["Invalid set name: \"%s\". Set names must [1] not be empty, [2] be unique (case insensitive) and [3] not contain \"$\" (reserved)."] = "不正確的套件名稱: \"%s\". 套件名稱 [1] 不可為空白, [2] 唯一 [3] 不可包括 \"$\" (保留字).";
-L["Macro \"%s\""]                                                                                       = "巨集 \"%s\"";
 L["Macro warning: There is no set named \"%s\"."]                                                       = "巨集警示: 沒有套件 \"%s\".";
 L["Not enough bag space. Switching aborted."]                                                           = "包包空間不足. 無法切換.";
 L["Not enough bag space. Current space: %s, needed: %s"]                                                = "包包空間不足. 目前格數: %s, 需要格數: %s";

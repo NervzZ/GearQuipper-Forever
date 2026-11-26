@@ -12,9 +12,9 @@ local checkboxYOffset, dropdownYOffset = 22, 60;
 function c:InitUiFrame()
     GqUiFrame.TitleText:SetTextColor(1, 1, 1, 1);
     GqUiFrame.TitleText:SetPoint("TOPLEFT", 70, -5);
-    GqUiFrame.TitleText:SetText("GearQuipper WOTLK v" .. c:GetVersion());
+    GqUiFrame.TitleText:SetText("GearQuipper Forever v" .. c:GetVersion());
 
-    GqUiFrame_BtnOptions:GetFontString():SetFont("Fonts\\FRIZQT__.TTF", 10);
+    GqUiFrame_BtnOptions:GetFontString():SetFont("Fonts\\FRIZQT__.TTF", 10, "");
     GqUiFrame_BtnOptions:SetText(c:GetText("Options"));
 
     GqUiFrame_BtnSaveSet:SetText(c:GetText("Save set"));
@@ -25,43 +25,6 @@ function c:InitUiFrame()
     GqEventBindingFrame_CbDisableEventsFontString:SetText(c:GetText("Disable events"));
     GqEventBindingFrame_CbDisableEvents:SetChecked(not c:IsEventsEnabled());
     GqEventBindingFrame.CloseButton:Hide();
-
-    local S = c:GetElvUiSkinModule();
-    if S then
-        S:HandleFrame(GqUiFrame);
-        GqUiFrame:SetHeight(236);
-        GqUiFrame.CloseButton:SetPoint("TOPRIGHT", 2, 2);
-        GqUiFrame.TitleText:SetPoint("TOP", 0, -8);
-
-        S:HandleButton(GqUiFrame_BtnOptions);
-
-        S:HandleFrame(GqUiScrollFrameBorder);
-        GqUiScrollFrameBorder:SetPoint("TOPLEFT", 8, -30);
-        GqUiScrollFrameBorder:SetWidth(GqUiScrollFrameBorder:GetParent():GetWidth() - 16);
-        GqUiScrollFrameBorder:SetHeight(140);
-        GqUiScrollFrame:SetWidth(GqUiScrollFrame:GetParent():GetWidth() - 8);
-        S:HandleSliderFrame(GqUiScrollFrameVSlider);
-
-        S:HandleFrame(GqEventBindingFrame);
-        GqEventBindingFrame:SetPoint("BOTTOMLEFT", 0, -189);
-        GqEventBindingFrame:SetHeight(188);
-        S:HandleFrame(GqUiEventBindingsScrollFrameBorder);
-        GqUiEventBindingsScrollFrameBorder:SetPoint("TOPLEFT", 8, -8);
-        GqUiEventBindingsScrollFrameBorder:SetWidth(GqUiEventBindingsScrollFrameBorder:GetParent():GetWidth() - 16);
-        GqUiEventBindingsScrollFrameBorder:SetHeight(GqUiEventBindingsScrollFrameBorder:GetParent():GetHeight() - 42);
-        GqUiEventBindingsScrollFrame:SetWidth(GqUiEventBindingsScrollFrame:GetParent():GetWidth() - 8);
-        GqUiEventBindingsScrollFrame:SetHeight(GqUiEventBindingsScrollFrame:GetParent():GetHeight() - 8);
-        S:HandleSliderFrame(GqUiEventBindingsScrollFrameVSlider);
-        GqUiEventBindingsScrollFrameVSlider:SetHeight(GqUiEventBindingsScrollFrameVSlider:GetParent():GetHeight());
-
-        S:HandleButton(GqUiFrame_BtnSaveSet);
-        GqUiFrame_BtnSaveSet:SetPoint("BOTTOMRIGHT", -8, 35);
-        S:HandleButton(GqUiFrame_BtnRemoveSet);
-        GqUiFrame_BtnRemoveSet:SetPoint("BOTTOMRIGHT", -8, 8);
-
-        S:HandleCheckBox(GqEventBindingFrame_CbDisableEvents);
-        GqEventBindingFrame_CbDisableEvents:SetPoint("BOTTOMLEFT", 8, 6);
-    end
 end
 
 function c:ToggleUI(value)
@@ -70,7 +33,10 @@ function c:ToggleUI(value)
         c:HookCharacterStatsFrameScripts();
         c:SetFramePositions(); -- ... and move frames if needed
 
-        if value or not GqUiFrame:IsVisible() then
+        if value == nil then
+            value = not GqUiFrame:IsVisible();
+        end
+        if value then
             GqUiFrame:Show();
             GqUiFrame.isOpen = true;
         else
@@ -109,7 +75,6 @@ function c:LockUI(setName)
 
         if setInfoFrame then
             setInfoFrame.cbPartial:SetEnabled(false);
-            setInfoFrame.cbActionSlots:SetEnabled(false);
         end
 
         c:ToggleEvents(false);
@@ -140,7 +105,6 @@ function c:UnlockUI()
 
         if setInfoFrame then
             setInfoFrame.cbPartial:SetEnabled(true);
-            setInfoFrame.cbActionSlots:SetEnabled(c:IsActionSlotManagementEnabled());
         end
 
         c:ToggleEvents(c:IsEventsEnabled());
@@ -214,7 +178,6 @@ function c:RefreshSetList(scrollIntoView)
         setCheckBoxes[index].fontString:SetText(setName);
         setCheckBoxes[index]:SetChecked(setName == currentSet);
         setCheckBoxes[index]:SetIcon_Partial(c:LoadPartialOption(setName));
-        setCheckBoxes[index]:SetIcon_ActionSlots(c:LoadActionSlotsConditionsMet(setName));
         setCheckBoxes[index]:SetAlpha(1);
         setCheckBoxes[index]:SetEnabled(true);
         setCheckBoxes[index]:Show();
@@ -269,11 +232,6 @@ function c:RefreshSetList(scrollIntoView)
         btnAddSet.fontString = btnAddSet:CreateFontString("GqAddSetButton_FontString", "ARTWORK", "GameFontNormal");
         btnAddSet.fontString:SetPoint("CENTER");
         btnAddSet.fontString:SetText(c:GetText("Add set..."));
-
-        local S = c:GetElvUiSkinModule();
-        if S then
-            S:HandleButton(btnAddSet);
-        end
     end
     btnAddSet:SetPoint("TOPLEFT", 2, -(noSets - 1) * checkboxYOffset - 2);
 
@@ -284,7 +242,6 @@ function c:CreateSetEntry(index)
     local chSet = CreateFrame("CheckButton", "GqUiSetCheckBox_" .. index, GqUiScrollFrameContent,
         "ChatConfigCheckButtonTemplate");
     c:ClearPushedTexture(chSet);
-    chSet:SetPropagateKeyboardInput(true);
     chSet:SetPoint("TOPLEFT", 0, -(index - 1) * checkboxYOffset);
     chSet:SetScript("OnClick", function(self)
         SetCheckBox_OnClick(self);
@@ -308,21 +265,6 @@ function c:CreateSetEntry(index)
             self.iconFrame.partial.fontString:SetText(c:FormatTextWithColor("p", "777777"));
         else
             self.iconFrame.partial.fontString:SetText(nil);
-        end
-    end
-
-    chSet.iconFrame.actionslots = CreateFrame("Frame", "GqUiSetCheckBox_" .. index .. "_IconFrame_ActionSlots",
-        chSet.iconFrame);
-    chSet.iconFrame.actionslots:SetAllPoints();
-    chSet.iconFrame.actionslots.fontString = chSet:CreateFontString(
-        "GqUiSetCheckBox_" .. index .. "_IconFrame_FontString", "ARTWORK", "GameFontNormalSmall")
-    chSet.iconFrame.actionslots.fontString:SetPoint("BOTTOMLEFT", 22, 8);
-
-    chSet.SetIcon_ActionSlots = function(self, value)
-        if value == true then
-            self.iconFrame.actionslots.fontString:SetText(c:FormatTextWithColor("a", "777777"));
-        else
-            self.iconFrame.actionslots.fontString:SetText(nil);
         end
     end
 
@@ -354,13 +296,6 @@ function c:CreateSetEntry(index)
     chSet.pullButton:SetFrameLevel(chSet:GetFrameLevel() + 1);
     chSet.pullButton:Hide();
 
-    local S = c:GetElvUiSkinModule();
-    if S then
-        S:HandleCheckBox(chSet);
-        S:HandleButton(chSet.pushButton);
-        S:HandleButton(chSet.pullButton);
-    end
-
     return chSet;
 end
 
@@ -382,16 +317,10 @@ function c:RefreshEventEntries()
             eventEntries[index].lblEvent.fontString:SetText(string.format("[%s] %s", index,
                 c:GetEvents()[bindingEntry[c.FIELD_TYPE]]));
 
-            if bindingEntry[c.FIELD_SUBTYPE] then
-                if bindingEntry[c.FIELD_SUBTYPE]["name"] then
-                    -- zone
-                    eventEntries[index].lblEventInfo2.fontString:SetText(c:FormatTextWithColor(
-                        bindingEntry[c.FIELD_SUBTYPE]["name"], "ffffff"));
-                elseif bindingEntry[c.FIELD_SUBTYPE][c.FIELD_NAME] then
-                    -- script
-                    eventEntries[index].lblEventInfo2.fontString:SetText(c:FormatTextWithColor(
-                        bindingEntry[c.FIELD_SUBTYPE][c.FIELD_NAME], "ffffff"));
-                end
+            local subType = bindingEntry[c.FIELD_SUBTYPE];
+            if type(subType) == "table" and subType["name"] then
+                -- zone, form, aura, stance, talent specialization
+                eventEntries[index].lblEventInfo2.fontString:SetText(c:FormatTextWithColor(subType["name"], "ffffff"));
             end
 
             local infos = {};
@@ -414,7 +343,8 @@ function c:RefreshEventEntries()
             end
         else
             eventEntries[index].lblEvent.fontString:SetText(c:GetText("Deprecated event"));
-            eventEntries[index].lblEventInfo1.fontString:SetText(c:FormatTextWithColor(setName, "ffffff"));
+            eventEntries[index].lblEventInfo1.fontString:SetText(c:FormatTextWithColor(
+                tostring(bindingEntry[c.FIELD_NAME] or ""), "ffffff"));
             eventEntries[index].lblEventInfo2.fontString:SetText(
                 c:FormatTextWithColor(c:GetText("Replace me!"), "ffffff"));
             eventEntries[index].cbSet:Hide();
@@ -429,8 +359,7 @@ function c:RefreshEventEntries()
         GqUiEventBindingsScrollFrameVSlider:SetMinMaxValues(0, maxValue);
     end
 
-    local S = c:GetElvUiSkinModule();
-    if (not S and noBindings > 2) or (S and noBindings > 2.5) then
+    if noBindings > 2 then
         GqUiEventBindingsScrollFrameVSlider:Show();
     elseif GqUiEventBindingsScrollFrameVSlider:IsVisible() then
         GqUiEventBindingsScrollFrameVSlider:Hide();
@@ -447,10 +376,6 @@ function c:RefreshEventEntries()
             "GameFontNormal");
         btnAddBinding.fontString:SetPoint("CENTER");
         btnAddBinding.fontString:SetText(c:GetText("Add event..."));
-
-        if S then
-            S:HandleButton(btnAddBinding);
-        end
     end
     btnAddBinding:SetPoint("BOTTOMLEFT", 2, -noBindings * dropdownYOffset + 4);
     btnAddBinding:Show();
@@ -489,6 +414,7 @@ function c:CreateEventEntry(index)
     local info = UIDropDownMenu_CreateInfo();
     info.hasArrow = false;
     info.notCheckable = true;
+    info.arg1 = frame;
 
     -- set dropdown
     frame.cbSet = CreateFrame("Frame", "GqUiBindingEntry_" .. index .. "_SetDropdown", frame, "UIDropDownMenuTemplate");
@@ -512,7 +438,6 @@ function c:CreateEventEntry(index)
             for setIndex, setName in ipairs(c:LoadSetNames()) do
                 info.text = setName;
                 info.value = setName;
-                info.arg1 = frame;
                 UIDropDownMenu_AddButton(info);
             end
         end
@@ -529,14 +454,6 @@ function c:CreateEventEntry(index)
     frame.btnDelete.fontString:SetPoint("CENTER");
     frame.btnDelete.fontString:SetText(c:GetText("Remove event"));
 
-    local S = c:GetElvUiSkinModule();
-    if S then
-        S:HandleDropDownBox(frame.cbSet);
-        frame.cbSet:SetPoint("TOPRIGHT", 7, 0);
-        S:HandleButton(frame.btnDelete);
-        frame.btnDelete:SetPoint("BOTTOMRIGHT", 0, 7);
-    end
-
     return frame;
 end
 
@@ -544,12 +461,10 @@ function c:ShowSetInfo(setName)
     if setName then
         if not setInfoFrame then
             setInfoFrame = CreateFrame("Frame", "GqUiSetInfoFrame", GqUiFrame);
-            setInfoFrame:SetPoint("TOPLEFT", 25, -GqUiScrollFrameBorder:GetHeight() - GqUiFrame.CloseButton:GetHeight());
+            -- directly below the set list (GQ derived this from the 32 px classic close button, which is 24 px now)
+            setInfoFrame:SetPoint("TOPLEFT", GqUiScrollFrameBorder, "BOTTOMLEFT", 5, -2);
             setInfoFrame:SetHeight(GqUiFrame:GetHeight() - GqUiScrollFrameBorder:GetHeight() - 20);
             setInfoFrame:SetWidth(setInfoFrame:GetParent():GetWidth() - 6);
-            setInfoFrame.fontString = setInfoFrame:CreateFontString("GqUiSetInfoFrame_FontString", "ARTWORK",
-                "GameFontNormal");
-            setInfoFrame.fontString:SetPoint("LEFT");
 
             setInfoFrame.cbPartial = CreateFrame("CheckButton", "GqUiSetInfoFrame_CheckButtonPartial", setInfoFrame,
                 "ChatConfigCheckButtonTemplate");
@@ -561,41 +476,11 @@ function c:ShowSetInfo(setName)
                 "GqUiSetInfoFrame_CheckButtonPartial_FontString", "ARTWORK", "GameFontNormal");
             setInfoFrame.cbPartial.fontString:SetPoint("LEFT", 25, 0);
             setInfoFrame.cbPartial.fontString:SetText(c:GetText("Partial"));
-
-            setInfoFrame.cbActionSlots = CreateFrame("CheckButton", "GqUiSetInfoFrame_CheckButtonActionSlots",
-                setInfoFrame, "ChatConfigCheckButtonTemplate");
-            setInfoFrame.cbActionSlots:SetPoint("TOPLEFT", 0, -29);
-            setInfoFrame.cbActionSlots:SetScript("OnClick", function(self)
-                BtnSetActionSlotOption_Click(self);
-            end);
-            setInfoFrame.cbActionSlots.fontString = setInfoFrame.cbActionSlots:CreateFontString(
-                "GqUiSetInfoFrame_CheckButtonActionSlots_FontString", "ARTWORK", "GameFontNormal");
-            setInfoFrame.cbActionSlots.fontString:SetPoint("LEFT", 25, 0);
-            setInfoFrame.cbActionSlots.fontString:SetText(c:GetText("Affects action slots"));
-
-            local S = c:GetElvUiSkinModule();
-            if S then
-                setInfoFrame:SetPoint("TOPLEFT", 8,
-                    -GqUiScrollFrameBorder:GetHeight() - GqUiFrame.CloseButton:GetHeight());
-                setInfoFrame:SetHeight(GqUiFrame:GetHeight() - GqUiScrollFrameBorder:GetHeight() - 38);
-                setInfoFrame:SetWidth(setInfoFrame:GetParent():GetWidth() - 16);
-
-                S:HandleCheckBox(setInfoFrame.cbPartial);
-                setInfoFrame.cbPartial:SetPoint("TOPLEFT", 0, -2);
-
-                S:HandleCheckBox(setInfoFrame.cbActionSlots);
-                setInfoFrame.cbActionSlots:SetPoint("TOPLEFT", 0, -31);
-            end
         end
 
         -- partial option
         setInfoFrame.cbPartial.setName = setName;
         setInfoFrame.cbPartial:SetChecked(c:LoadPartialOption(setName));
-
-        -- action slots option
-        setInfoFrame.cbActionSlots.setName = setName;
-        c:SetCheckboxEnabled(setInfoFrame.cbActionSlots, c:IsActionSlotManagementEnabled());
-        setInfoFrame.cbActionSlots:SetChecked(c:LoadActionSlotsConditionsMet(setName));
         setInfoFrame:Show();
 
         GqUiFrame_BtnSaveSet:Show();
@@ -610,37 +495,44 @@ end
 
 ----- ui frame interaction -----
 
-function c:SetGqUiFramePosition()
-    local ecsFrame = _G[c:GetCharacterStatsFrameNames()[1]];
-    local dcsFrame = _G[c:GetCharacterStatsFrameNames()[2]];
-    local elvWaFrame = _G[c:GetCharacterStatsFrameNames()[3]];
-    local elv, elvWa = c:GetElvUiSkinModule(), elvWaFrame and elvWaFrame:IsVisible();
-    local ecs, dcs = ecsFrame and ecsFrame:IsVisible(), dcsFrame and dcsFrame:IsVisible();
-
-    local xOffset, yOffset = 290, -14; -- default interface
-
-    if elv then
-        -- elvui
-        xOffset, yOffset = 310, -11.5;
-        if ecs or dcs then
-            xOffset = 490;
-        elseif elvWa then
-            GqUiFrame:SetHeight(246.5);
-            c.paperDollFrame.paperDollButton:SetPoint("TOPRIGHT", c.paperDollFrame, "TOPRIGHT", -10, -45);
-            xOffset = 330;
-            if elvWa then
-                xOffset = xOffset + elvWaFrame:GetWidth() + 9;
-            end
-        end
-    elseif ecs then
-        -- ecs + default
-        xOffset = 472;
-    elseif dcs then
-        -- dcs + default
-        xOffset = 496;
+-- Width of the character window's side tabs (Character / Reputation / Skills ...), which stick out of its right edge.
+local function GetCharacterFrameTabsWidth()
+    local characterFrame = _G["CharacterFrame"];
+    local tabs = characterFrame and characterFrame.ModeTabs;
+    if not (tabs and tabs:IsShown()) then
+        return 0;
     end
 
-    GqUiFrame:SetPoint("TOPRIGHT", xOffset, yOffset);
+    local frameRight = c:SafeCall(characterFrame.GetRight, characterFrame);
+    local tabsRight;
+    if frameRight then
+        for _, tab in ipairs(tabs.Tabs or {}) do
+            local right = tab:IsShown() and c:SafeCall(tab.GetRight, tab);
+            if right then
+                right = right * tab:GetEffectiveScale() / characterFrame:GetEffectiveScale();
+                if not tabsRight or right > tabsRight then
+                    tabsRight = right;
+                end
+            end
+        end
+    end
+    if tabsRight and tabsRight > frameRight then
+        return tabsRight - frameRight;
+    end
+    return tabs:GetWidth();
+end
+
+function c:SetGqUiFramePosition()
+    -- beside the character window, right of its side tabs (the Forever window has no transparent art margin)
+    local xOffset, yOffset = GetCharacterFrameTabsWidth() + 2, 0;
+
+    local ecsFrame = _G[c:GetCharacterStatsFrameNames()[1]];
+    if ecsFrame and ecsFrame:IsVisible() then
+        xOffset = xOffset + ecsFrame:GetWidth();
+    end
+
+    GqUiFrame:ClearAllPoints();
+    GqUiFrame:SetPoint("TOPLEFT", c.paperDollFrame, "TOPRIGHT", xOffset, yOffset);
 end
 
 function GqUiFrame_OnShow(gqFrame)
@@ -654,8 +546,6 @@ function GqUiFrame_OnShow(gqFrame)
     else
         c:UnlockUI();
     end
-
-    c:ShowSlotStateBoxes();
 end
 
 function GqUiFrame_OnHide(self)
@@ -729,17 +619,8 @@ function BtnSetPartialOption_Click(self)
     c:RefreshSetList(c:LoadCurrentSetName());
 end
 
-function BtnSetActionSlotOption_Click(self)
-    c:SaveActionSlotsOption(self.setName, self:GetChecked());
-    if self:GetChecked() and not c:IsSameActionConfiguration(self.setName) then
-        c:ShowLoadSaveActionSlotsDialog(self);
-    end
-    c:RefreshSetList(c:LoadCurrentSetName());
-end
-
 function BtnOptions_OnClick(self)
-    InterfaceOptionsFrame_Show();
-    InterfaceOptionsFrame_OpenToCategory(c.name);
+    c:OpenSettingsPanel();
 end
 
 function BtnSaveSet_OnClick(self)

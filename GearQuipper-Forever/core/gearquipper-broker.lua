@@ -5,8 +5,6 @@ local LDB;
 
 local eventListeners = {};
 
-GQ_EVENT_ACTIONSLOT_SAVED = "GQ_EVENT_ACTIONSLOT_SAVED";
-GQ_EVENT_ACTIONSLOT_SET_SAVED = "GQ_EVENT_ACTIONSLOT_SET_SAVED";
 GQ_EVENT_EVENT_BINDING_REMOVED = "GQ_EVENT_EVENT_BINDING_REMOVED";
 GQ_EVENT_EVENT_BINDING_SAVED = "GQ_EVENT_EVENT_BINDING_SAVED";
 GQ_EVENT_SET_REMOVED = "GQ_EVENT_SET_REMOVED";
@@ -16,7 +14,13 @@ GQ_EVENT_SLOT_STATE_SAVED = "GQ_EVENT_SLOT_STATE_SAVED";
 
 function c:InitBroker()
     if LibStub and not LDB then
-        LDB = LibStub('LibDataBroker-1.1'):NewDataObject('GearQuipper', {
+        local libDataBroker = LibStub('LibDataBroker-1.1', true);
+        if not libDataBroker then
+            c:Println(c:GetText("Error while initializing data broker!"));
+            return;
+        end
+
+        LDB = libDataBroker:NewDataObject('GearQuipper', {
             label = 'GearQuipper',
             type = 'data source',
             icon = "Interface\\Icons\\Ability_warrior_defensivestance",
@@ -50,13 +54,14 @@ function c:InitBroker()
                                 elseif environment then
                                     environment = environment .. " )";
                                 end
-                                local setName = binding[c.FIELD_NAME];
+                                local setName = binding[c.FIELD_NAME] or UNKNOWN;
                                 if setName == c.KEYWORD_PREVIOUS then
                                     setName = c:GetText("[Previous equipment]");
                                 end
-                                self:AddLine(c:GetText("%s will switch to %s %s", c:FormatTextWithColor(
-                                    c:GetEvents()[binding[c.FIELD_TYPE]], "FFFFFF"),
-                                    c:FormatTextWithColor(setName, "FFFFFF"), environment));
+                                local eventName = c:GetEvents()[binding[c.FIELD_TYPE]] or tostring(type or UNKNOWN);
+                                self:AddLine(c:GetText("%s will switch to %s %s",
+                                    c:FormatTextWithColor(eventName, "FFFFFF"), c:FormatTextWithColor(setName, "FFFFFF"),
+                                    environment or ""));
                             end
                         else
                             self:AddLine(c:GetText("Active event bindings:") .. " " ..
@@ -71,7 +76,7 @@ function c:InitBroker()
             OnClick = function(self, button)
                 if button == "RightButton" then
                     CloseDropDownMenus();
-                    ToggleDropDownMenu(1, nil, LDB.dropDownMenu, _G[self:GetName()], -4, -4);
+                    ToggleDropDownMenu(1, nil, LDB.dropDownMenu, self, -4, -4);
                 end
             end,
             OnDoubleClick = function(self, button)
@@ -126,7 +131,7 @@ function c:InitBroker()
                     info.checked = (setName == currentSet);
                     info.func = function()
                         if setName ~= currentSet then
-                            c:SwitchToSet({
+                            c:QueueSwitch({
                                 [c.SWITCHARG_SETNAME] = setName
                             });
                         end
@@ -153,9 +158,8 @@ end
 
 --- Returns a list of valid GearQuipper events.
 function c:GetEventListenerEvents()
-    return {GQ_EVENT_ACTIONSLOT_SAVED, GQ_EVENT_ACTIONSLOT_SET_SAVED, GQ_EVENT_EVENT_BINDING_REMOVED,
-            GQ_EVENT_EVENT_BINDING_SAVED, GQ_EVENT_SET_REMOVED, GQ_EVENT_SET_SAVED, GQ_EVENT_SLOT_SAVED,
-            GQ_EVENT_SLOT_STATE_SAVED};
+    return {GQ_EVENT_EVENT_BINDING_REMOVED, GQ_EVENT_EVENT_BINDING_SAVED, GQ_EVENT_SET_REMOVED, GQ_EVENT_SET_SAVED,
+            GQ_EVENT_SLOT_SAVED, GQ_EVENT_SLOT_STATE_SAVED};
 end
 
 --- Registers event listener for given event. See gearquipper:GetEventListenerEvents() for list of valid events.
@@ -167,7 +171,7 @@ function c:RegisterEventListener(event, func, o)
     if event and func then
         local listener = o or {};
 
-        listener.gqEventListenerId = c:uuid();
+        listener.gqEventListenerId = listener.gqEventListenerId or c:uuid();
         listener.GetGqEventListenerId = function(self)
             return self.gqEventListenerId;
         end;
@@ -190,11 +194,15 @@ end
 function c:RemoveEventListener(listener, event)
     if listener and listener:GetGqEventListenerId() then
         if event then
-            eventListeners[event][listener:GetGqEventListenerId()] = nil;
+            if eventListeners[event] then
+                eventListeners[event][listener:GetGqEventListenerId()] = nil;
+            end
             listener.gqEventListenerEvents[event] = nil;
         else
             for event, _ in pairs(listener.gqEventListenerEvents) do
-                eventListeners[event][listener:GetGqEventListenerId()] = nil;
+                if eventListeners[event] then
+                    eventListeners[event][listener:GetGqEventListenerId()] = nil;
+                end
             end
             listener.gqEventListenerEvents = {};
         end
@@ -208,7 +216,10 @@ end
 function c:NotifyEventListeners(event, ...)
     if event and eventListeners[event] then
         for _, listener in pairs(eventListeners[event]) do
-            listener:OnEvent(event, ...);
+            local ok, err = pcall(listener.OnEvent, listener, event, ...);
+            if not ok then
+                geterrorhandler()(err);
+            end
         end
     end
 end

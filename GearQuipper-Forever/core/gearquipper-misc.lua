@@ -2,97 +2,19 @@
 gearquipper = gearquipper or {};
 local c = gearquipper;
 
-local CONTAINER_FIRST_BANK_BAG_ID = NUM_BAG_SLOTS + 1;
-local CONTAINER_LAST_BANK_BAG_ID = NUM_BAG_SLOTS + NUM_BANKBAGSLOTS;
-local CONTAINER_FIRST_BANK_SLOT_ID = 60;
-local CONTAINER_FIRST_BANK_SLOT_ID_LEGACY = 48;
-local CONTAINER_LAST_BANK_SLOT_ID = 87;
-local CONTAINER_LAST_BANK_SLOT_ID_LEGACY = 75;
-local CONTAINER_BAGPACK_ID = 0;
+-- Stored values are compared in normalised form (see c:GetItemString); numbers (ammo item ids) pass through.
+local function NormalizeStored(value)
+    if type(value) == "string" then
+        return c:NormalizeItemString(value) or value;
+    end
+    return value;
+end
 
 function c:SaveConditionsMet(type)
     type = type or c.OPT_SAVECHANGES;
     return GQ_OPTIONS[type] == c.OPTVALUE_SAVECHANGES_ALWAYS or
                (GQ_OPTIONS[type] == c.OPTVALUE_SAVECHANGES_CHARMENU and c.paperDollFrame:IsVisible()) or
                (GQ_OPTIONS[type] == c.OPTVALUE_SAVECHANGES_GQMENU and GqUiFrame:IsVisible());
-end
-
-function c:LoadActionSlotsConditionsMet(setName)
-    setName = setName or c:LoadCurrentSetName();
-
-    if not c:IsActionSlotManagementEnabled() then
-        return false;
-    end
-    if not c:LoadActionSlotsOption(setName) then
-        return false;
-    end
-
-    return true;
-end
-
-local ACTION_FUNC, ACTION_DELAY_MILLISECONDS = "FUNC", "DELAY";
-local queuedActions, currentAction = {};
-local function ExecuteNextQueuedAction()
-    if not currentAction and getn(queuedActions) > 0 then
-        currentAction = c:Dequeue(queuedActions);
-        C_Timer.After(currentAction[ACTION_DELAY_MILLISECONDS] / 1000, function()
-            currentAction[ACTION_FUNC]();
-            currentAction = nil;
-            ExecuteNextQueuedAction();
-        end);
-    end
-end
-
-function c:QueueAction(func, delayMilliseconds)
-    delayMilliseconds = delayMilliseconds or 0;
-    tinsert(queuedActions, {
-        [ACTION_FUNC] = func,
-        [ACTION_DELAY_MILLISECONDS] = delayMilliseconds
-    });
-    ExecuteNextQueuedAction();
-end
-
------ [ actions ] -----
-local actionBars = {"Action", "Action", "MultiBarRight", "MultiBarLeft", "MultiBarBottomRight", "MultiBarBottomLeft"};
-function c:GetActionButton(slotId)
-    slotId = tonumber(slotId);
-    if slotId then
-        local actionBar, buttonNo = math.floor((slotId - 1) / 12) + 1, ((slotId - 1) % 12) + 1;
-        if actionBar and (actionBar > 2 or actionBar == GetActionBarPage()) and actionBars[actionBar] and buttonNo then
-            local button = _G[actionBars[actionBar] .. "Button" .. buttonNo];
-            if button and button:IsVisible() then
-                return button;
-            end
-        end
-    end
-end
-
-function c:IsSameAction(slotId, entry)
-    if HasAction(slotId) and entry and entry ~= c.VALUE_NONE then
-        local actionType, id, subType = GetActionInfo(slotId);
-        if actionType == "macro" then
-            -- macros are saved by name, not by id
-            id = GetMacroInfo(id);
-        end
-
-        if actionType == entry[c.FIELD_TYPE] and id == entry[c.FIELD_ID] and subType == entry[c.FIELD_SUBTYPE] then
-            return true;
-        end
-    elseif not HasAction(slotId) and entry == c.VALUE_NONE then
-        return true;
-    end
-end
-
-function c:IsSameActionConfiguration(setName)
-    if setName then
-        local desiredActionSlots = c:LoadActionSlots(setName);
-        for slotId = 1, 120 do
-            if not c:IsSameAction(slotId, desiredActionSlots[slotId]) then
-                return false;
-            end
-        end
-        return true;
-    end
 end
 
 ----- [ events ] -----
@@ -122,10 +44,7 @@ c.EVENT_SHAPESHIFT_IN = "EVENT_SHAPESHIFT_IN";
 c.EVENT_SHAPESHIFT_OUT = "EVENT_SHAPESHIFT_OUT";
 c.EVENT_AURA_CHANGED = "EVENT_AURA_CHANGED"; -- paladin auras
 c.EVENT_STANCE_CHANGED = "EVENT_STANCE_CHANGED"; -- warrior stances
-c.EVENT_PRESENCE_CHANGED = "EVENT_PRESENCE_CHANGED"; -- deathknight presences
-c.EVENT_TALENTS_CHANGED = "EVENT_TALENTS_CHANGED"; -- dual spec
-
-c.EVENT_CUSTOMSCRIPT = "EVENT_CUSTOMSCRIPT";
+c.EVENT_TALENTS_CHANGED = "EVENT_TALENTS_CHANGED"; -- spec group swap
 
 local events, eventNamesSorted;
 function c:GetEvents()
@@ -152,17 +71,12 @@ function c:GetEvents()
             [c.EVENT_COMBAT_ENTER] = c:GetText("on enter combat"),
             [c.EVENT_COMBAT_LEAVE] = c:GetText("on leave combat"),
             -- [c.EVENT_SPELLCAST_START] = c:GetText("on spell start"),
-            -- [c.EVENT_CUSTOMSCRIPT] = c:GetText("custom script")
             [c.EVENT_SHAPESHIFT_IN] = c:GetText("on shapeshift (enter)"),
             [c.EVENT_SHAPESHIFT_OUT] = c:GetText("on shapeshift (leave)"),
             [c.EVENT_AURA_CHANGED] = c:GetText("on aura change"),
-            [c.EVENT_PRESENCE_CHANGED] = c:GetText("on presence change"),
-            [c.EVENT_STANCE_CHANGED] = c:GetText("on stance change")
+            [c.EVENT_STANCE_CHANGED] = c:GetText("on stance change"),
+            [c.EVENT_TALENTS_CHANGED] = c:GetText("on talents change")
         };
-
-        if not c:IsClassic() then
-            events[c.EVENT_TALENTS_CHANGED] = c:GetText("on talents change");
-        end
     end
     return events;
 end
@@ -194,6 +108,7 @@ end
 
 function c:IsItemEquipped(itemString)
     -- needed for checking swapped rings on sets
+    itemString = NormalizeStored(itemString);
     local list = {};
     for _, slotId in ipairs(c:GetSlotSwitchOrder()) do
         if c:Equals(c:GetItemString(slotId), itemString) then
@@ -203,22 +118,6 @@ function c:IsItemEquipped(itemString)
     if getn(list) > 0 then
         return list;
     end
-end
-
-function c:GetAffectedActionSlots(setName, currentSetName)
-    local affectedSlots = {};
-    if c:LoadActionSlotsConditionsMet(setName) then
-        for slotId = 1, 120 do
-            local actionSlot, currentActionSlot = c:LoadActionSlot(slotId, setName),
-                c:LoadActionSlot(slotId, currentSetName);
-
-            if actionSlot[c.FIELD_TYPE] ~= currentActionSlot[c.FIELD_TYPE] or actionSlot[c.FIELD_ID] ~=
-                currentActionSlot[c.FIELD_ID] or actionSlot[c.FIELD_SUBTYPE] ~= currentActionSlot[c.FIELD_SUBTYPE] then
-                tinsert(affectedSlots, slotId);
-            end
-        end
-    end
-    return affectedSlots;
 end
 
 function c:GetAffectedEquipmentSlots(setName, currentSetName)
@@ -237,9 +136,6 @@ function c:AffectsOnlyWeapons(setName, currentSetName)
     if not currentSetName then
         return false; -- might be improved some day; this is just a workaround for a rare scenario
     end
-    if getn(c:GetAffectedActionSlots(setName, currentSetName)) > 0 then
-        return false;
-    end
     for _, slotId in ipairs(c:GetAffectedEquipmentSlots(setName, currentSetName)) do
         if slotId ~= INVSLOT_MAINHAND and slotId ~= INVSLOT_OFFHAND and slotId ~= INVSLOT_RANGED then
             return false;
@@ -249,9 +145,6 @@ function c:AffectsOnlyWeapons(setName, currentSetName)
 end
 
 function c:IsWeaponsOnlySet(setName)
-    if c:LoadActionSlotsOption(setName) then
-        return false;
-    end
     if not c:LoadPartialOption(setName) then
         return false;
     end
@@ -266,34 +159,19 @@ end
 
 ---- [bank] ----
 
-function c:IsAtBank()
-    local noFreeSlots, bagType = GetContainerNumFreeSlots(BANK_CONTAINER);
-    return bagType ~= nil;
-end
-
+--- Returns cache, sum: cache[bankTabBagId] = free slots of that character bank tab (0 if it may not hold gear).
 function c:GetBankSpace()
     if c:IsAtBank() then
         local bankSpaceCache, sum = {}, 0;
-
-        -- bank bags
-        for i = CONTAINER_FIRST_BANK_BAG_ID, CONTAINER_LAST_BANK_BAG_ID do
-            local invId, noFreeSlots, bagType = ContainerIDToInventoryID(i), GetContainerNumFreeSlots(i);
-            if bagType == 0 then
-                bankSpaceCache[invId] = noFreeSlots;
+        for _, bagId in ipairs(c:GetBankBagIds()) do
+            local noFreeSlots, bagType = c:GetContainerNumFreeSlots(bagId);
+            if bagType == 0 and noFreeSlots then
+                bankSpaceCache[bagId] = noFreeSlots;
                 sum = sum + noFreeSlots;
             else
-                bankSpaceCache[invId] = 0;
+                bankSpaceCache[bagId] = 0;
             end
         end
-
-        -- bank container
-        for i = CONTAINER_FIRST_BANK_SLOT_ID, CONTAINER_LAST_BANK_SLOT_ID do
-            if not GetInventoryItemLink("player", i) then
-                bankSpaceCache[i] = 1;
-                sum = sum + 1;
-            end
-        end
-
         return bankSpaceCache, sum;
     end
 end
@@ -332,45 +210,37 @@ function c:CheckNeccessaryPullSpace(setName)
     end
 end
 
---- Returns a tuple of (containerId, slotId) for the use of PickupContainerItem(containerId, containerSlotId).
+--- Returns bagId, slotId of the first character bank tab slot holding the item (for c:PickupContainerItem), or nil.
 ---@param itemString string
 function c:FindItemInBank(itemString)
-    local minBankContainerId, maxBankContainerId = CONTAINER_FIRST_BANK_SLOT_ID_LEGACY,
-        CONTAINER_LAST_BANK_SLOT_ID_LEGACY;
-    if c:IsNewApi() then
-        minBankContainerId, maxBankContainerId = CONTAINER_FIRST_BANK_SLOT_ID, CONTAINER_LAST_BANK_SLOT_ID;
+    itemString = NormalizeStored(itemString);
+    if not itemString or itemString == c.VALUE_NONE then
+        return nil;
     end
 
-    -- bank container
-    for containerId = minBankContainerId, maxBankContainerId do
-        local containerItemString = c:GetItemString(GetInventoryItemLink("player", containerId));
-        if c:Equals(containerItemString, itemString) then
-            return containerId - (minBankContainerId - 1);
-        end
-    end
-
-    -- bank bags
-    for containerId = CONTAINER_FIRST_BANK_BAG_ID, CONTAINER_LAST_BANK_BAG_ID do
-        for containerSlotId = 1, GetContainerNumSlots(containerId) do
-            local containerItemString = c:GetItemString(GetContainerItemLink(containerId, containerSlotId));
+    for _, bagId in ipairs(c:GetBankBagIds()) do
+        for containerSlotId = 1, c:GetContainerNumSlots(bagId) do
+            local containerItemString = c:GetItemString(c:GetContainerItemLink(bagId, containerSlotId));
             if c:Equals(itemString, containerItemString) then
-                return containerId, containerSlotId;
+                return bagId, containerSlotId;
             end
         end
     end
+    return nil;
 end
 
 ---- [bags] ----
 
+--- Returns cache, sum: cache[bagId] = free slots for every bag of c:GetBagIds() (0 for special bags).
 function c:GetBagSpace()
     local bagSpaceCache, sum = {}, 0;
-    for i = CONTAINER_BAGPACK_ID, NUM_BAG_SLOTS do
-        local noFreeSlots, bagType = GetContainerNumFreeSlots(i);
-        if bagType == 0 then
-            bagSpaceCache[i] = noFreeSlots;
+    for _, bagId in ipairs(c:GetBagIds()) do
+        local noFreeSlots, bagType = c:GetContainerNumFreeSlots(bagId);
+        if bagType == 0 and noFreeSlots then
+            bagSpaceCache[bagId] = noFreeSlots;
             sum = sum + noFreeSlots;
         else
-            bagSpaceCache[i] = 0;
+            bagSpaceCache[bagId] = 0;
         end
     end
     return bagSpaceCache, sum;
@@ -399,10 +269,15 @@ function c:CheckNeccessaryBagSpace(setName)
 end
 
 function c:FindItemInBags(neededItemString)
+    neededItemString = NormalizeStored(neededItemString);
+    if not neededItemString or neededItemString == c.VALUE_NONE then
+        return nil;
+    end
+
     local list = {};
-    for bagId = CONTAINER_BAGPACK_ID, NUM_BAG_SLOTS do
-        for slotId = 1, GetContainerNumSlots(bagId) do
-            local itemString = c:GetItemString(GetContainerItemLink(bagId, slotId));
+    for _, bagId in ipairs(c:GetBagIds()) do
+        for slotId = 1, c:GetContainerNumSlots(bagId) do
+            local itemString = c:GetItemString(c:GetContainerItemLink(bagId, slotId));
             if itemString == neededItemString then
                 tinsert(list, {
                     bagId = bagId,
@@ -418,20 +293,20 @@ end
 
 ----- [ items ] -----
 
+--- Slot 0 (ammo): numeric item id or nil. Slot 1..19: normalised item string of the equipped item.
+--- Item link or item string: normalised item string. Anything else (or an empty slot): VALUE_NONE.
+--- Every item string GearQuipper stores or compares comes from here.
 function c:GetItemString(value)
     if value then
         if value == INVSLOT_AMMO then
             -- ammo slot workaround
-            return GetInventoryItemID("player", INVSLOT_AMMO);
-        elseif c:GetSlotInfo(value) then
+            return c:SafeCall(GetInventoryItemID, "player", INVSLOT_AMMO);
+        elseif type(value) == "number" and c:GetSlotInfo(value) then
             -- slotId
-            return c:GetItemString(GetInventoryItemLink("player", value));
-        elseif c:StartsWith(value, "|c") then
-            -- itemLink
-            return string.match(value, "item[%-?%d:]+");
-        elseif c:StartsWith(value, "item:") then
-            -- return self
-            return value;
+            return c:NormalizeItemString(GetInventoryItemLink("player", value)) or c.VALUE_NONE;
+        elseif type(value) == "string" then
+            -- itemLink or itemString
+            return c:NormalizeItemString(value) or c.VALUE_NONE;
         end
     end
     return c.VALUE_NONE;
@@ -456,7 +331,11 @@ local function GetItemInfos(itemString, info)
     if itemString and not c:IsEmpty(itemString) then
         local itemInfo = {};
         itemInfo[ITEMINFO_NAME], itemInfo[ITEMINFO_LINK], itemInfo[ITEMINFO_RARITY], itemInfo[ITEMINFO_LEVEL], itemInfo[ITEMINFO_MINLEVEL], itemInfo[ITEMINFO_TYPE], itemInfo[ITEMINFO_SUBTYPE], itemInfo[ITEMINFO_STACKCOUNT], itemInfo[ITEMINFO_EQUIPLOC] =
-            GetItemInfo(itemString);
+            c:GetItemInfo(itemString);
+        if not itemInfo[ITEMINFO_NAME] then
+            -- not cached yet; the next call after GET_ITEM_INFO_RECEIVED returns it
+            c:RequestItemData(itemString);
+        end
 
         return itemInfo[info];
     end
@@ -502,24 +381,14 @@ local slotIdToEquipLocs = {
     [INVSLOT_AMMO] = {"INVTYPE_AMMO"}
 }
 
-local allInventoryTypes = {INVTYPE_HEAD, INVTYPE_NECK, INVTYPE_NECK, INVTYPE_SHOULDER, INVTYPE_BODY, INVTYPE_CHEST,
-                           INVTYPE_ROBE, INVTYPE_WAIST, INVTYPE_LEGS, INVTYPE_FEET, INVTYPE_WRIST, INVTYPE_HAND,
-                           INVTYPE_FINGER, INVTYPE_TRINKET, INVTYPE_CLOAK, INVTYPE_WEAPON, INVTYPE_2HWEAPON,
-                           INVTYPE_WEAPONMAINHAND, INVTYPE_WEAPONOFFHAND, INVTYPE_SHIELD, INVTYPE_QUIVER,
-                           INVTYPE_HOLDABLE, INVTYPE_RANGED, INVTYPE_THROWN, INVTYPE_RANGEDRIGHT, INVTYPE_RELIC,
-                           INVTYPE_TABARD, INVTYPE_AMMO};
-
-function c:GetAllInventoryTypes()
-    return allInventoryTypes;
-end
-
 function c:GetItemEquipLoc(value)
     if c:GetSlotInfo(value) then
         -- slotId
         return slotIdToEquipLocs[value];
-    else
-        -- itemString
-        return GetItemInfos(value, ITEMINFO_EQUIPLOC);
+    elseif not c:IsEmpty(value) then
+        -- itemString, itemLink or itemId; GetItemInfoInstant does not need the item cache
+        local _, _, _, equipLoc = c:GetItemInfoInstant(value);
+        return equipLoc;
     end
 end
 
@@ -556,44 +425,34 @@ function c:GetMatchingItems(slotId)
     end
     -- end
 
+    local function IsMatching(itemString)
+        local equipLoc = c:GetItemEquipLoc(itemString);
+        return equipLoc and tContains(equipLocs, equipLoc);
+    end
+
+    local function AddContainerItems(bagIds)
+        for _, bagId in ipairs(bagIds) do
+            for containerSlotId = 1, c:GetContainerNumSlots(bagId) do
+                local itemString = c:GetItemString(c:GetContainerItemLink(bagId, containerSlotId));
+                if not c:IsEmpty(itemString) and IsMatching(itemString) then
+                    table.insert(result, CreateEntry(bagId, containerSlotId, itemString));
+                end
+            end
+        end
+    end
+
     -- bags
-    for bagId = CONTAINER_BAGPACK_ID, NUM_BAG_SLOTS do
-        for containerSlotId = 1, GetContainerNumSlots(bagId) do
-            local itemString = c:GetItemString(GetContainerItemLink(bagId, containerSlotId));
-            if not c:IsEmpty(itemString) and tContains(equipLocs, c:GetItemEquipLoc(itemString)) then
-                table.insert(result, CreateEntry(bagId, containerSlotId, itemString));
-            end
-        end
-    end
+    AddContainerItems(c:GetBagIds());
 
-    -- bank container
-    local minInvId, maxInvId = CONTAINER_FIRST_BANK_SLOT_ID_LEGACY, CONTAINER_LAST_BANK_SLOT_ID_LEGACY;
-    if c:IsNewApi() then
-        minInvId, maxInvId = CONTAINER_FIRST_BANK_SLOT_ID, CONTAINER_LAST_BANK_SLOT_ID;
-    end
-    for invId = minInvId, maxInvId do
-        local itemString = c:GetItemString(GetInventoryItemLink("player", invId));
-        if not c:IsEmpty(itemString) and tContains(equipLocs, c:GetItemEquipLoc(itemString)) then
-            table.insert(result, CreateEntry(BANK_CONTAINER, invId - (CONTAINER_FIRST_BANK_SLOT_ID - 1), itemString));
-        end
-    end
-
-    -- bank bags
-    for bagId = CONTAINER_FIRST_BANK_BAG_ID, CONTAINER_LAST_BANK_BAG_ID do
-        for containerSlotId = 1, GetContainerNumSlots(bagId) do
-            local itemString = c:GetItemString(GetContainerItemLink(bagId, containerSlotId));
-            if not c:IsEmpty(itemString) and tContains(equipLocs, c:GetItemEquipLoc(itemString)) then
-                table.insert(result, CreateEntry(bagId, containerSlotId, itemString));
-            end
-        end
-    end
+    -- bank tabs (empty unless the bank is open)
+    AddContainerItems(c:GetBankBagIds());
 
     -- equipped items (dual wield, rings, trinkets)
-    local itemString = GetInventoryItemLink("player", slotId);
-    if not c:IsEmpty(itemString) and tContains(equipLocs, c:GetItemEquipLoc(itemString)) then
+    local itemString = c:GetItemString(slotId);
+    if not c:IsEmpty(itemString) and IsMatching(itemString) then
         local itemSlots = c:GetItemSlots(itemString);
         for _, equippedSlotId in ipairs(itemSlots) do
-            local equippedItemString = GetInventoryItemLink("player", equippedSlotId);
+            local equippedItemString = c:GetItemString(equippedSlotId);
             if not c:IsEmpty(equippedItemString) and not c:Equals(equippedItemString, itemString) then
                 table.insert(result, CreateEntry(nil, equippedSlotId, equippedItemString));
             end
@@ -613,11 +472,11 @@ function c:CacheCurrentGearAndBags()
     };
 
     -- bags
-    for bagId = CONTAINER_BAGPACK_ID, NUM_BAG_SLOTS do
+    for _, bagId in ipairs(c:GetBagIds()) do
         cache[CACHETYPE_BAGS][bagId] = cache[CACHETYPE_BAGS][bagId] or {};
 
-        for slotId = 1, GetContainerNumSlots(bagId) do
-            local itemString = c:GetItemString(GetContainerItemLink(bagId, slotId));
+        for slotId = 1, c:GetContainerNumSlots(bagId) do
+            local itemString = c:GetItemString(c:GetContainerItemLink(bagId, slotId));
             if itemString then
                 cache[CACHETYPE_BAGS][bagId][slotId] = itemString;
             end
@@ -641,15 +500,26 @@ end
 function c:GetFirstChangedItem(lastGearAndBagsCache)
     local newCache = c:CacheCurrentGearAndBags();
 
+    -- same item name; falls back to the item id while a name is not cached (both would read EMPTY)
+    local function IsSameItem(oldItemString, newItemString)
+        local oldName, newName = c:GetItemName(oldItemString), c:GetItemName(newItemString);
+        if oldName ~= EMPTY and newName ~= EMPTY then
+            return oldName == newName;
+        end
+        local oldItemId = c:GetItemId(oldItemString);
+        return oldItemId ~= nil and oldItemId == c:GetItemId(newItemString);
+    end
+
     if lastGearAndBagsCache then
         for type, typeValues in pairs(newCache) do
             for bagId, bagValues in pairs(typeValues) do
+                local lastBagValues = lastGearAndBagsCache[type] and lastGearAndBagsCache[type][bagId];
                 for slotId, newItemString in pairs(bagValues) do
-                    local oldItemString = lastGearAndBagsCache[type][bagId][slotId];
+                    local oldItemString = lastBagValues and lastBagValues[slotId];
 
                     -- both not empty + same slot + same itemname + different itemstring
                     if not c:IsEmpty(oldItemString) and not c:IsEmpty(newItemString) and oldItemString ~= newItemString and
-                        c:GetItemName(oldItemString) == c:GetItemName(newItemString) then
+                        IsSameItem(oldItemString, newItemString) then
                         return type, bagId, slotId, oldItemString, newItemString;
                     end
                 end
@@ -663,161 +533,12 @@ function c:GetItemSlots(itemString)
         local result = {};
         local itemType = c:GetItemEquipLoc(itemString);
         for slotId, itemTypes in pairs(slotIdToEquipLocs) do
-            if tContains(itemTypes, itemType) then
+            if itemType and tContains(itemTypes, itemType) then
                 tinsert(result, slotId);
             end
         end
         return result;
     end
-end
-
-function c:CompareItemStats(itemLink1, itemLink2)
-    if itemLink1 and itemLink2 then
-        local itemStats1, itemStats2 = GetItemStats(itemLink1), GetItemStats(itemLink2);
-        local result = {};
-        for name, value in pairs(itemStats1) do
-            if itemStats2[name] then
-                result[name] = itemStats2[name] - value;
-            else
-                result[name] = value;
-            end
-        end
-        for name, value in pairs(itemStats2) do
-            if not itemStats1[name] then
-                result[name] = value;
-            end
-        end
-        return result, itemStats1, itemStats2;
-    end
-end
-
-local scanTooltips = {};
-local function GetScanTooltip()
-    for _, tt in ipairs(scanTooltips) do
-        if not tt:GetItem() then
-            return tt;
-        end
-    end
-
-    local index = table.getn(scanTooltips);
-    local tt = CreateFrame("GameTooltip", "GQ_ScanTooltip_" .. index, UIParent, "GameTooltipTemplate");
-    tt.Prepare = function(self, itemLink)
-        self:SetOwner(UIParent);
-        self:SetHyperlink(itemLink);
-        return self;
-    end;
-
-    table.insert(scanTooltips, tt);
-    return tt;
-end
-
--- ITEM_LIMIT_CATEGORY_MULTIPLE 
--- /run print(ITEM_LIMIT_CATEGORY_MULTIPLE) -> regex "(3)" ??
-
-local function HasUniqueFlag(...)
-    for i = 1, select("#", ...) do
-        local region = select(i, ...)
-        if region and region:GetObjectType() == "FontString" then
-            local text = region:GetText() -- string or nil
-            if c:StartsWith(text, ITEM_UNIQUE_EQUIPPABLE) then
-                return true;
-            end
-        end
-    end
-end
-
-function c:GetUniqueGems(slotIdOrItemString, setName)
-    local itemString;
-    if setName then
-        itemString = c:LoadSlot(slotIdOrItemString, setName);
-    else
-        itemString = c:GetItemString(slotIdOrItemString);
-    end
-
-    local result = {};
-    if not c:IsEmpty(itemString) then
-        for i = 1, 3 do
-            local gemItemName, gemItemLink = GetItemGem(itemString, i);
-            if gemItemLink then
-                local tt = GetScanTooltip():Prepare(gemItemLink);
-                if HasUniqueFlag(tt:GetRegions()) then
-                    tinsert(result, c:GetItemString(gemItemLink));
-                end
-                tt:Hide();
-            end
-        end
-    end
-
-    return result;
-end
-
-function c:GetAllUniqueGems(setName, slotIds)
-    slotIds = slotIds or c:GetDefaultSlotSwitchOrder();
-
-    local result = {};
-    for _, slotId in ipairs(slotIds) do
-        local itemString;
-        if setName then
-            itemString = c:LoadSlot(slotId, setName);
-        else
-            itemString = c:GetItemString(slotId);
-        end
-
-        local uniqueGems = c:GetUniqueGems(itemString);
-        if getn(uniqueGems) > 0 then
-            result[slotId] = uniqueGems;
-        end
-    end
-
-    return result;
-end
-
-function c:IsGemSocketed(gemItemString, slotId, setName)
-    if not c:IsEmpty(gemItemString) then
-        local slotIds;
-        if slotId then
-            slotIds = {slotId};
-        else
-            slotIds = c:GetDefaultSlotSwitchOrder();
-        end
-
-        setName = setName or c:LoadCurrentSetName();
-        for _, slotId in ipairs(slotIds) do
-            local itemString = c:LoadSlot(slotId, setName);
-            if not c:IsEmpty(itemString) then
-                for i = 1, 3 do
-                    local gemItemName, gemItemLink = GetItemGem(itemString, i);
-                    if gemItemLink and c:GetItemString(gemItemLink) == gemItemString then
-                        return slotId;
-                    end
-                end
-            end
-        end
-    end
-end
-
------ [ macros ] -----
-
-local MACROINFO_NAME = "MACROINFO_NAME";
-local MACROINFO_TEXT = "MACROINFO_TEXT";
-local function GetMacroInfos(macroSlotId, info)
-    local macroInfo = {};
-    macroInfo[MACROINFO_NAME], macroInfo["icon"], macroInfo[MACROINFO_TEXT], macroInfo["isLocal"] = GetMacroInfo(
-        macroSlotId);
-    if MACROINFO_NAME then
-        return c:GetText("Macro \"%s\"", macroInfo[MACROINFO_NAME]);
-    elseif macroInfo[info] then
-        return macroInfo[info];
-    end
-    return EMPTY;
-end
-
-function c:GetMacroName(macroSlotId)
-    return GetMacroInfos(macroSlotId, MACROINFO_NAME);
-end
-
-function c:GetMacroText(macroSlotId)
-    return GetMacroInfos(macroSlotId, MACROINFO_TEXT);
 end
 
 ----- [ sets ] -----
@@ -874,7 +595,7 @@ end
 
 function c:IsSetItemOnSlot(slotId, itemString)
     itemString = itemString or c:LoadSlot(slotId);
-    return c:Equals(c:GetItemString(slotId), itemString);
+    return c:Equals(c:GetItemString(slotId), NormalizeStored(itemString));
 end
 
 function c:IsEmpty(value)
@@ -994,58 +715,9 @@ function c:GetDefaultSlotSwitchOrder()
     return defaultSlotSwitchOrder;
 end
 
-local function IterateUniqueGemSlots(gemItemString, setName, otherSetName, switchOrder, gemItemStrings,
-    remainingIterations)
-    gemItemStrings = gemItemStrings or {};
-    remainingIterations = remainingIterations or 10;
-    remainingIterations = remainingIterations - 1;
-
-    if remainingIterations > 0 then
-        tinsert(gemItemStrings, gemItemString);
-        local slotId = c:IsGemSocketed(gemItemString, nil, setName);
-        if slotId then
-            for _, otherGemItemString in ipairs(c:GetUniqueGems(slotId, setName)) do
-                if not c:TableContains(gemItemStrings, otherGemItemString) then
-                    IterateUniqueGemSlots(otherGemItemString, otherSetName, setName, switchOrder, gemItemStrings,
-                        remainingIterations);
-                end
-            end
-            c:InsertIfNotExists(switchOrder, slotId);
-        end
-    end
-end
-
+-- targetSetName is kept for callers; without gems the order does not depend on the set.
 function c:GetSlotSwitchOrder(targetSetName)
-    if not targetSetName then
-        return c:GetDefaultSlotSwitchOrder();
-    end
-
-    local switchOrder = {}
-    -- local currentSetName = c:LoadCurrentSetName();
-    -- local currentSetUniqueGems = c:GetAllUniqueGems(currentSetName);
-    -- local targetSetUniqueGems = c:GetAllUniqueGems(targetSetName);
-    -- for _, slotId in ipairs(defaultSlotSwitchOrder) do
-    --     if targetSetUniqueGems[slotId] then
-    --         for _, gemItemString in ipairs(targetSetUniqueGems[slotId]) do
-    --             IterateUniqueGemSlots(gemItemString, currentSetName, targetSetName, switchOrder);
-    --         end
-    --     end
-    --     c:InsertIfNotExists(switchOrder, slotId);
-    -- end
-
-    for _, slotId in ipairs(defaultSlotSwitchOrder) do
-        if getn(c:GetUniqueGems(slotId)) > 0 then
-            tinsert(switchOrder, slotId);
-        end
-    end
-
-    for _, slotId in ipairs(defaultSlotSwitchOrder) do
-        if not c:TableContains(switchOrder, slotId) then
-            tinsert(switchOrder, slotId);
-        end
-    end
-
-    return switchOrder;
+    return c:GetDefaultSlotSwitchOrder();
 end
 
 function c:GetSlotId(slotName)
@@ -1068,15 +740,15 @@ local displaySlotNames = {
     [8] = INVTYPE_FEET,
     [9] = INVTYPE_WRIST,
     [10] = INVTYPE_HAND,
-    [11] = INVTYPE_FINGER .. " 1",
-    [12] = INVTYPE_FINGER .. " 2",
-    [13] = INVTYPE_TRINKET .. " 1",
-    [14] = INVTYPE_TRINKET .. " 2",
+    [11] = (INVTYPE_FINGER or "Finger") .. " 1",
+    [12] = (INVTYPE_FINGER or "Finger") .. " 2",
+    [13] = (INVTYPE_TRINKET or "Trinket") .. " 1",
+    [14] = (INVTYPE_TRINKET or "Trinket") .. " 2",
     [15] = INVTYPE_CLOAK,
     [16] = INVTYPE_WEAPONMAINHAND,
     [17] = INVTYPE_WEAPONOFFHAND,
     [18] = INVTYPE_RANGED,
-    [19] = INVTYPE_ROBE
+    [19] = INVTYPE_TABARD
 };
 
 function c:GetDisplaySlotName(slotId)
@@ -1085,194 +757,15 @@ function c:GetDisplaySlotName(slotId)
     end
 end
 
------ [ spells ] -----
+----- [ forms, auras, stances, specs ] -----
 
-local SPELLINFO_NAME = "SPELLINFO_NAME";
-local SPELLINFO_RANK = "SPELLINFO_RANK";
-local SPELLINFO_ICON = "SPELLINFO_ICON";
-local SPELLINFO_CASTTIME = "SPELLINFO_CASTTIME";
-local SPELLINFO_MINRANGE = "SPELLINFO_MINRANGE";
-local SPELLINFO_MAXRANGE = "SPELLINFO_MAXRANGE";
-local function GetSpellInfos(spellId, info)
-    if spellId and not c:IsEmpty(spellId) then
-        local spellInfo = {};
-        spellInfo[SPELLINFO_NAME], spellInfo[SPELLINFO_RANK], spellInfo[SPELLINFO_ICON], spellInfo[SPELLINFO_CASTTIME], spellInfo[SPELLINFO_MINRANGE], spellInfo[SPELLINFO_MAXRANGE] =
-            GetSpellInfo(spellId);
-        return spellInfo[info];
-    end
-end
-
-function c:GetSpellName(spellId)
-    local spellName = GetSpellInfos(spellId, SPELLINFO_NAME);
-    if spellName then
-        return spellName;
-    end
-    return EMPTY;
-end
-
-function c:GetSpellSubText(spellId)
-    return GetSpellSubtext(spellId);
-end
-
-function c:GetSpellLink(spellId)
-    return GetSpellLink(spellId);
-end
-
-local spellCache;
-function c:GetSpellCache(refresh)
-    if not spellCache or refresh then
-        spellCache = {};
-        for i = 0, 99999 do
-            local name, rank, icon, castTime, minRange, maxRange, spellId = GetSpellInfo(i);
-            if name and spellId then
-                local rank = GetSpellSubtext(spellId);
-                spellCache[spellId] = {
-                    ["name"] = name,
-                    ["rank"] = rank,
-                    ["numericRank"] = c:GetNumericSpellRank(rank),
-                    ["icon"] = icon,
-                    ["castTime"] = castTime,
-                    ["minRange"] = minRange,
-                    ["maxRange"] = maxRange,
-                    ["spellId"] = spellId
-                };
-            end
-        end
-    end
-    return spellCache;
-end
-
--- /dump gearquipper:SearchSpells(gearquipper:GetSpellName(8836))
-function c:SearchSpells(spellName, maxResults)
-    if spellName and spellName ~= "" then
-        maxResults = maxResults or 20;
-
-        local result = {};
-        for spellId, spell in pairs(c:GetSpellCache()) do
-            if c:StringContains(spell["name"], spellName, true) then
-                table.insert(result, spell);
-                if getn(result) == maxResults then
-                    return result, maxResults;
-                end
-            end
-        end
-        return result;
-    end
-end
-
--- /dump gearquipper:GetSpellId("Verteidigungshaltung")
-function c:GetSpellId(spellName, spellRank)
-    for spellId, spellInfo in pairs(c:GetSpellCache()) do
-        if spellInfo["name"] == spellName and spellInfo["rank"] == spellRank then
-            return spellId;
-        end
-    end
-end
-
-function c:GetNumericSpellRank(spellRankText)
-    if spellRankText then
-        local noStart, noEnd = string.find(spellRankText, "%d+");
-        if noStart and noEnd then
-            local rank = string.sub(spellRankText, noStart, noEnd);
-            if c:IsNumeric(rank) then
-                return tonumber(rank);
-            end
-        end
-    end
-end
-
--- /dump gearquipper:GetMaxRankSpellId(8835)
-function c:GetMaxRankSpellId(spellId)
-    local spellName = c:GetSpellName(spellId);
-    if spellName then
-        local maxRank = 0;
-        local maxRankSpellId;
-        for _, spell in ipairs(c:SearchSpells(spellName)) do
-            if spell["numericRank"] and (not maxRank or maxRank < spell["numericRank"]) then
-                maxRank = spell["numericRank"];
-                maxRankSpellId = spell["spellId"];
-            end
-        end
-        return maxRankSpellId;
-    end
-end
-
-local function GetOffsetRankSpellId(sourceSpellId, offset)
-    local name, rank = GetSpellInfo(sourceSpellId);
-    if not rank or rank == "" then
-        rank = GetSpellSubtext(sourceSpellId);
-    end
-    c:DebugPrint(name, rank) -- TODO: this is nil, nil for some reason..?
-    if name and rank and rank ~= "" then
-        local noStart, noEnd = string.find(rank, "%d+");
-        local len = string.len(rank);
-
-        if rank and noStart then
-            local numericSpellRank = string.sub(rank, noStart, noEnd);
-            c:DebugPrint("Numeric spell rank:", numericSpellRank);
-
-            if numericSpellRank then
-                numericSpellRank = tonumber(numericSpellRank);
-                local targetNumericRank = numericSpellRank + offset;
-
-                if targetNumericRank > 0 then
-                    local textBefore, textAfter = "", "";
-                    if noStart > 0 then
-                        textBefore = string.sub(rank, 0, noStart - 1);
-                    end
-                    if noEnd < len - 1 then
-                        textAfter = string.sub(noEnd, len - 1);
-                    end
-                    c:DebugPrint("textBefore: ", textBefore);
-                    c:DebugPrint("targetNumericRank: ", targetNumericRank);
-                    c:DebugPrint("textAfter: ", textAfter);
-                    local targetRank = textBefore .. targetNumericRank .. textAfter;
-                    c:DebugPrint("TargetRank: ", targetRank);
-
-                    return c:GetSpellId(name, targetRank);
-                end
-            end
-        end
-    end
-end
-
-function c:GetHigherRankSpellId(sourceSpellId)
-    return GetOffsetRankSpellId(sourceSpellId, 1);
-end
-
-function c:GetLowerRankSpellId(sourceSpellId)
-    return GetOffsetRankSpellId(sourceSpellId, -1);
-end
-
-function c:GetUprankableSpellIds(targetSpellId)
-    local result, breaker = {}, 30;
-    local spellId = c:GetLowerRankSpellId(targetSpellId);
-    while spellId ~= nil do
-        tinsert(result, spellId);
-        spellId = c:GetLowerRankSpellId(spellId);
-        breaker = breaker - 1;
-        if breaker <= 0 then
-            return;
-        end
-    end
-    return result;
-end
-
-function c:DumpBuffs(unitId)
-    for i, spellId in pairs(c:GetCurrentBuffs(unitId)) do
-        print(i, c:GetSpellName(spellId), spellId);
-    end
-end
-
+-- Values are spell names from c:GetSpellName; a spell this client does not know leaves no entry.
 c.SPELLID_DRUID_FORM_NORMAL = c.VALUE_NONE;
 c.SPELLID_DRUID_FORM_AQUATIC = 1066;
 c.SPELLID_DRUID_FORM_BEAR = 5487;
 c.SPELLID_DRUID_FORM_CAT = 768;
 c.SPELLID_DRUID_FORM_DIRE_BEAR = 9634;
-c.SPELLID_DRUID_FORM_FLIGHT = 33943;
-c.SPELLID_DRUID_FORM_FLIGHT_EPIC = 40120;
 c.SPELLID_DRUID_FORM_TRAVEL = 783;
-c.SPELLID_DRUID_FORM_TREE_OF_LIFE = 33891;
 c.SPELLID_DRUID_FORM_MOONKIN = 24858;
 
 local druidForms;
@@ -1284,10 +777,7 @@ function c:GetDruidForms()
             [c.SPELLID_DRUID_FORM_BEAR] = c:GetSpellName(c.SPELLID_DRUID_FORM_BEAR),
             [c.SPELLID_DRUID_FORM_CAT] = c:GetSpellName(c.SPELLID_DRUID_FORM_CAT),
             [c.SPELLID_DRUID_FORM_DIRE_BEAR] = c:GetSpellName(c.SPELLID_DRUID_FORM_DIRE_BEAR),
-            [c.SPELLID_DRUID_FORM_FLIGHT] = c:GetSpellName(c.SPELLID_DRUID_FORM_FLIGHT),
-            [c.SPELLID_DRUID_FORM_FLIGHT_EPIC] = c:GetSpellName(c.SPELLID_DRUID_FORM_FLIGHT_EPIC),
             [c.SPELLID_DRUID_FORM_TRAVEL] = c:GetSpellName(c.SPELLID_DRUID_FORM_TRAVEL),
-            [c.SPELLID_DRUID_FORM_TREE_OF_LIFE] = c:GetSpellName(c.SPELLID_DRUID_FORM_TREE_OF_LIFE),
             [c.SPELLID_DRUID_FORM_MOONKIN] = c:GetSpellName(c.SPELLID_DRUID_FORM_MOONKIN)
         };
     end
@@ -1302,14 +792,16 @@ function c:GetDruidFormsSorted()
     return druidFormsSorted;
 end
 
+-- Paladin auras and warrior stances: keys are rank 1 ids, and detection matches the active spell by NAME,
+-- so every rank of an aura maps to its entry here.
 c.SPELLID_PALADIN_AURA_NONE = c.VALUE_NONE;
 c.SPELLID_PALADIN_AURA_CONCENTRATION = 19746;
-c.SPELLID_PALADIN_AURA_CRUSADER = 32223;
-c.SPELLID_PALADIN_AURA_DEVOTION = 27149;
-c.SPELLID_PALADIN_AURA_FIRE_RES = 27153;
-c.SPELLID_PALADIN_AURA_FROST_RES = 27152;
-c.SPELLID_PALADIN_AURA_RETRIBUTION = 27150;
-c.SPELLID_PALADIN_AURA_SHADOW_RES = 27151;
+c.SPELLID_PALADIN_AURA_DEVOTION = 465;
+c.SPELLID_PALADIN_AURA_FIRE_RES = 19891;
+c.SPELLID_PALADIN_AURA_FROST_RES = 19888;
+c.SPELLID_PALADIN_AURA_RETRIBUTION = 7294;
+c.SPELLID_PALADIN_AURA_SANCTITY = 20218;
+c.SPELLID_PALADIN_AURA_SHADOW_RES = 19876;
 
 local paladinAuras;
 function c:GetPaladinAuras()
@@ -1317,11 +809,11 @@ function c:GetPaladinAuras()
         paladinAuras = {
             [c.SPELLID_PALADIN_AURA_NONE] = c:GetText("< " .. NONE_KEY .. " >"),
             [c.SPELLID_PALADIN_AURA_CONCENTRATION] = c:GetSpellName(c.SPELLID_PALADIN_AURA_CONCENTRATION),
-            [c.SPELLID_PALADIN_AURA_CRUSADER] = c:GetSpellName(c.SPELLID_PALADIN_AURA_CRUSADER),
             [c.SPELLID_PALADIN_AURA_DEVOTION] = c:GetSpellName(c.SPELLID_PALADIN_AURA_DEVOTION),
             [c.SPELLID_PALADIN_AURA_FIRE_RES] = c:GetSpellName(c.SPELLID_PALADIN_AURA_FIRE_RES),
             [c.SPELLID_PALADIN_AURA_FROST_RES] = c:GetSpellName(c.SPELLID_PALADIN_AURA_FROST_RES),
             [c.SPELLID_PALADIN_AURA_RETRIBUTION] = c:GetSpellName(c.SPELLID_PALADIN_AURA_RETRIBUTION),
+            [c.SPELLID_PALADIN_AURA_SANCTITY] = c:GetSpellName(c.SPELLID_PALADIN_AURA_SANCTITY),
             [c.SPELLID_PALADIN_AURA_SHADOW_RES] = c:GetSpellName(c.SPELLID_PALADIN_AURA_SHADOW_RES)
         };
     end
@@ -1360,52 +852,12 @@ function c:GetWarriorStancesSorted()
     return warriorStancesSorted;
 end
 
-c.SPELLID_DEATHKNIGHT_PRESENCE_BLOOD = 48266;
-c.SPELLID_DEATHKNIGHT_PRESENCE_FROST = 48263;
-c.SPELLID_DEATHKNIGHT_PRESENCE_UNHOLY = 48265;
-
-local deathknightPresences;
-function c:GetDeathKnightPresences()
-    if not deathknightPresences then
-        deathknightPresences = {
-            [c.SPELLID_DEATHKNIGHT_PRESENCE_BLOOD] = c:GetSpellName(c.SPELLID_DEATHKNIGHT_PRESENCE_BLOOD),
-            [c.SPELLID_DEATHKNIGHT_PRESENCE_FROST] = c:GetSpellName(c.SPELLID_DEATHKNIGHT_PRESENCE_FROST),
-            [c.SPELLID_DEATHKNIGHT_PRESENCE_UNHOLY] = c:GetSpellName(c.SPELLID_DEATHKNIGHT_PRESENCE_UNHOLY)
-        };
-    end
-    return deathknightPresences;
-end
-
-local deathknightPresencesSorted;
-function c:GetDeathKnightPresencesSorted()
-    if not deathknightPresencesSorted then
-        deathknightPresencesSorted = c:GetTableValuesSorted(c:GetDeathKnightPresences());
-    end
-    return deathknightPresencesSorted;
-end
-
-function c:GetCurrentBuffs(unitId)
-    unitId = unitId or "player";
-    local i, buffsById, buffsBySpellId = 1, {}, {};
-    while true do
-        local name, buff, count, buffType, duration, expirationTime, isMine, isStealable, _, spellId = UnitBuff(unitId,
-            i);
-        if not name then
-            break
-        end
-        buffsById[i] = spellId;
-        buffsBySpellId[spellId] = name;
-        i = i + 1;
-    end
-    return buffsById, buffsBySpellId;
-end
-
 local talentSpecializations;
 function c:GetTalentSpecializations()
     if not talentSpecializations then
         talentSpecializations = {
-            [1] = TALENT_SPEC_PRIMARY,
-            [2] = TALENT_SPEC_SECONDARY
+            [1] = TALENT_SPEC_PRIMARY or c:GetText("Primary"),
+            [2] = TALENT_SPEC_SECONDARY or c:GetText("Secondary")
         };
     end
     return talentSpecializations;
@@ -1425,18 +877,8 @@ local zoneCache = {};
 function c:GetZoneChildrenSorted(parentMapId)
     if not zoneCache[parentMapId] then
         zoneCache[parentMapId] = {};
-        for k, v in ipairs(C_Map.GetMapChildrenInfo(parentMapId)) do
+        for k, v in ipairs(C_Map.GetMapChildrenInfo(parentMapId) or {}) do
             table.insert(zoneCache[parentMapId], v);
-            -- if parentMapId == 1945 then
-            -- add outland dungeons/raids
-            -- for ck, cv in ipairs(C_Map.GetMapChildrenInfo(v["mapID"])) do
-            --	table.insert(zoneCache[parentMapId], cv);
-            -- end
-            -- end
-        end
-        if parentMapId == 947 then
-            table.insert(zoneCache[parentMapId], C_Map.GetMapInfo(1945)); -- outlands
-            table.insert(zoneCache[parentMapId], C_Map.GetMapInfo(1956)); -- eye of the storm (bg)
         end
         table.sort(zoneCache[parentMapId], function(a, b)
             local a, b = c:ReplaceUmlauts(a["name"]), c:ReplaceUmlauts(b["name"]); -- umlaute
@@ -1467,15 +909,44 @@ end
 
 function c:GetZoneDisplayName(mapId)
     local zoneInfo = c:GetZoneInfo(mapId);
+    if not zoneInfo then
+        return tostring(mapId or UNKNOWN);
+    end
     local parentZoneEntry = c:GetZoneInfo(zoneInfo["parentMapID"]);
-    if parentZoneEntry["mapID"] ~= 947 then
+    if parentZoneEntry and parentZoneEntry["mapID"] ~= 947 then
         return zoneInfo["name"] .. ", " .. parentZoneEntry["name"];
     end
     return zoneInfo["name"];
 end
 
+-- Classic map ids of the vanilla battlegrounds (Alterac Valley, Warsong Gulch, Arathi Basin): fallback only.
+local battlegroundMapIds = {
+    [1459] = true,
+    [1460] = true,
+    [1461] = true
+};
+
+local function IsInBattleground()
+    local instanceType = c:SafeCall(function()
+        return select(2, IsInInstance());
+    end);
+    return instanceType == "pvp" or c:ReadState(C_PvP and C_PvP.IsBattleground) == true;
+end
+
+-- Forever's battleground map ids may differ from Classic's: the player's current map counts as a battleground
+-- while the player is in a pvp instance, and is remembered so leaving it is recognised as well.
 function c:IsZoneBattleground(mapId)
-    return mapId == 1459 or mapId == 1460 or mapId == 1461 or mapId == 1956;
+    if not mapId then
+        return false;
+    end
+    if battlegroundMapIds[mapId] then
+        return true;
+    end
+    if mapId == c:SafeCall(C_Map.GetBestMapForUnit, "player") and IsInBattleground() then
+        battlegroundMapIds[mapId] = true;
+        return true;
+    end
+    return false;
 end
 
 ----- [ lua ] -----
@@ -1518,13 +989,13 @@ function c:EndsWith(str, substr, caseInsensitive)
 end
 
 function c:StringContains(str, match, caseInsensitive)
-    if str then
-        if match and caseInsensitive then
+    if str and match then
+        if caseInsensitive then
             str = string.upper(str);
             match = string.upper(match);
         end
 
-        return string.find(str, "%" .. match);
+        return string.find(str, match, 1, true);
     end
 end
 
@@ -1534,7 +1005,7 @@ end
 
 function c:ReplaceUmlauts(str)
     str = c:StringReplace(str, "Ä", "Ae");
-    str = c:StringReplace(str, "Ä", "ae");
+    str = c:StringReplace(str, "ä", "ae");
     str = c:StringReplace(str, "Ö", "Oe");
     str = c:StringReplace(str, "ö", "oe");
     str = c:StringReplace(str, "Ü", "Ue");
@@ -1639,26 +1110,6 @@ function c:Dequeue(t)
         local val = t[1];
         tremove(t, 1);
         return val;
-    end
-end
-
-function c:InsertIfNotExists(t, val)
-    if not c:TableContains(t, val) then
-        tinsert(t, val);
-        return true;
-    end
-end
-
-function c:DumpTable(t, prefix)
-    prefix = prefix or "";
-    if t then
-        if type(t) == "table" then
-            for k, v in pairs(t) do
-                print(prefix, k, v);
-            end
-        else
-            print(prefix, t);
-        end
     end
 end
 
@@ -1795,8 +1246,7 @@ function c:MathRound(x, decimals)
 end
 
 function c:IsAddonEnabled(addonName)
-    local name, title, notes, enabled, loadable, reason, security = GetAddOnInfo(addonName);
-    return title and enabled;
+    return c:SafeCall(c.IsAddOnLoaded, c, addonName) and true or false;
 end
 
 function c:RegisterDoubleClick(frame, func, button)
@@ -1822,37 +1272,6 @@ function c:uuid()
         local v = (c == 'x') and random(0, 0xf) or random(8, 0xb)
         return string.format('%x', v)
     end);
-end
-
-function c:ExperimentalCanUseStuff()
-    CreateFrame('GameTooltip', 'MyAddonTooltip') -- use a meaningful name
-    MyAddonTooltip:AddFontStrings(MyAddonTooltip:CreateFontString("$parentTextLeft1", nil, "GameTooltipText"),
-        MyAddonTooltip:CreateFontString("$parentTextRight1", nil, "GameTooltipText"))
-    MyAddonTooltip:SetOwner(UIParent, "ANCHOR_NONE")
-
-    local function IsTextRed(text)
-        if text and text:GetText() then
-            local r, g, b = text:GetTextColor()
-            -- Color values from RED_FONT_COLOR (see FrameXML/FontStyles.xml)
-            return math.floor(r * 256) == 255 and math.floor(g * 256) == 32 and math.floor(b * 256) == 32
-        end
-    end
-
-    local function SetItemHandler(self)
-        local tooltipName = self:GetName()
-        local name, link = self:GetItem()
-        for i = 1, self:NumLines() do
-            if IsTextRed(_G[tooltipName .. 'TextLeft' .. i]) or IsTextRed(_G[tooltipName .. 'TextRight' .. i]) then
-                print("You can't use " .. name) -- Do something more useful here
-                break
-            end
-        end
-        self:Hide()
-    end
-
-    MyAddonTooltip:SetScript('OnTooltipSetItem', SetItemHandler)
-
-    -- MyAddonTooltip:SetHyperlink("itemString") -- it is possible to use an actual item link
 end
 
 -- wow

@@ -9,7 +9,6 @@ local L = gearquipper.localizations["koKR"];
 -- donotDREAD
 -- Finger0226
 
-L["<%s> Saved action slot %s: %s"]                                                                      = "<%s> 세트 %s 액션 슬롯에 %s 저장";
 
 
 L["Add set..."]                                                                                         = "세트 추가";

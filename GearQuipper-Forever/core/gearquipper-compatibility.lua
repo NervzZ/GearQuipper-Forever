@@ -84,9 +84,11 @@ end
 -- items
 ---------------------------------------------------------------------------
 -- Canonical item string used for storage and every comparison:
---   item:itemID:enchantID:gem1:gem2:gem3:gem4:suffixID:uniqueID[:bonusID...]
+--   item:itemID:enchantID:gem1:gem2:gem3:gem4:suffixID:uniqueID[:::::numBonusIDs:bonusID...]
 -- Drops linkLevel, specializationID (changes on every spec swap), modifiers and context, so the same
 -- physical item keeps the same key across level-ups and spec swaps. "0" fields are written as "".
+-- Bonus ids stay at their link positions, so normalising a normalised string returns it unchanged (stored
+-- strings are normalised again before every comparison).
 local function SplitItemString(itemString)
     local fields = {};
     for field in (itemString .. ":"):gmatch("([^:]*):") do
@@ -121,9 +123,21 @@ function c:NormalizeItemString(linkOrString)
     -- fields[14] = numBonusIDs, followed by that many bonus ids
     local numBonusIds = tonumber(fields[14]);
     if numBonusIds and numBonusIds > 0 then
+        local bonusIds = {};
         for i = 15, 14 + numBonusIds do
             if fields[i] and fields[i] ~= "" then
-                parts[#parts + 1] = fields[i];
+                bonusIds[#bonusIds + 1] = fields[i];
+            end
+        end
+        if #bonusIds > 0 then
+            -- fields 10..13 (linkLevel, specID, modifiers mask, context) stay empty
+            parts[#parts + 1] = "";
+            parts[#parts + 1] = "";
+            parts[#parts + 1] = "";
+            parts[#parts + 1] = "";
+            parts[#parts + 1] = tostring(#bonusIds);
+            for _, bonusId in ipairs(bonusIds) do
+                parts[#parts + 1] = bonusId;
             end
         end
     end

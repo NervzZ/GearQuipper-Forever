@@ -8,7 +8,6 @@ local L = gearquipper.localizations["zhCN"];
 -- translation by:
 -- levis0792
 
-L["<%s> Saved action slot %s: %s"]                                                                      = "<%s> 保存动作条 %s: %s";
 L["<%s> Saved slot %s (%s): %s"]                                                                        = "<%s> 保存的插槽 %s (%s): %s";
 
 L["Add set..."]                                                                                         = "添加设置...";
@@ -20,7 +19,6 @@ L["Enter a name for this set:"]                                                 
 L["Expected Item:"]                                                                                     = "预期物品:";
 L["Highlight switched slots"]                                                                           = "高亮显示插槽";
 L["Invalid set name: \"%s\". Set names must [1] not be empty, [2] be unique (case insensitive) and [3] not contain \"$\" (reserved)."] = "无效的设置名称：\"%s\". 设置名称必须 [1] 不能为空, [2] 必须是唯一的(不区分大小写)并且 [3] 不能包含 \"$\"(保留).";
-L["Macro \"%s\""]                                                                                       = "宏 \"%s\"";
 L["Macro warning: There is no set named \"%s\"."]                                                       = "宏错误:没有命名的集合 \"%s\".";
 L["Not enough bag space. Switching aborted."]                                                           = "背包空间不够. 切换中止.";
 L["Not enough bag space. Current space: %s, needed: %s"]                                                = "背包空间不够. 当前空间: %s，需要: %s";

@@ -4,19 +4,35 @@ local c = gearquipper;
 
 local gqTooltips = {};
 local slotStateBoxes;
-local secureActionButtons = {};
+local dimmedBagFrames = {};
 
-local blizzardFrameNames = {"CraftFrame", "TradeSkillFrame", "BankFrame", "SpellBookFrame", "PlayerTalentFrame",
-                            "MailFrame"};
+-- frames that open beside the character window and are moved to the right of the GQ panel
+local blizzardFrameNames = {"BankFrame"};
 
 local ECS_FrameName = "ECS_StatsFrame";
-local DCS_FrameName = "DejaClassicStatsFrame";
-local ElvUI_WACS_FrameName = "WrathArmory_StatsPane";
-local csFrameNames = {ECS_FrameName, DCS_FrameName, ElvUI_WACS_FrameName};
+local csFrameNames = {ECS_FrameName};
 
-c.MACROACTION_NEW = "MACROACTION_NEW";
-c.MACROACTION_EDIT = "MACROACTION_EDIT";
-c.MACROACTION_DELETE = "MACROACTION_DELETE";
+local MAX_ITEMS_PER_CONTAINER = MAX_CONTAINER_ITEMS or 36;
+local FRAME_SPACING = 10;
+
+-- The Forever character window has a left pane (paper doll) and an optional right pane (stats / equipment
+-- manager). GQ's widgets belong to the paper doll part, so they anchor to the left pane when it exists.
+local function GetPaperDollAnchor()
+    local characterFrame = _G["CharacterFrame"];
+    return (characterFrame and characterFrame.LeftPaneHost) or c.paperDollFrame;
+end
+
+-- Edge of a frame, converted to the units of targetFrame; nil if unknown (not laid out yet or secret).
+local function GetFrameEdge(frame, edge, targetFrame)
+    local value = c:SafeCall(frame[edge], frame);
+    if not value then
+        return nil;
+    end
+    if targetFrame then
+        value = value * frame:GetEffectiveScale() / targetFrame:GetEffectiveScale();
+    end
+    return value;
+end
 
 ----- general ui stuff -----
 
@@ -26,107 +42,91 @@ function c:InitUI(paperDollFrame)
         c.paperDollFrame.paperDollButton = c.paperDollFrame.paperDollButton or c:CreatePaperDollButton();
         c.paperDollFrame.paperDollLabel = c.paperDollFrame.paperDollLabel or c:CreatePaperDollLabel();
 
-        c.paperDollFrame:HookScript("OnShow", function()
-            if GQ_OPTIONS[c.OPT_MENUOPEN] then
-                c:ToggleUI(true);
-            end
-            c:SetSlotInfo();
-            c:SetPaperDollLabelText();
-            c:SetGqUiFramePosition();
-
-            if c:IsSwitching() or c:IsInCombat() or c:IsDead() then
-                c:LockUI();
-            else
-                c:UnlockUI();
-            end
-
-            if c:IsWotlkClassic() then
-                _G["GearManagerToggleButton"]:ClearAllPoints();
-                if ElvUI then
-                    _G["GearManagerToggleButton"]:SetPoint("TOPLEFT", c.paperDollFrame, "TOPLEFT", 18, -33);
-                else
-                    _G["GearManagerToggleButton"]:SetPoint("TOPLEFT", c.paperDollFrame, "TOPLEFT", 75, -39);
+        -- InitUI runs again after "/gq reset": every hook is added only once
+        if not c.paperDollFrame.gqHooked then
+            c.paperDollFrame.gqHooked = true;
+            c.paperDollFrame:HookScript("OnShow", function()
+                if GQ_OPTIONS[c.OPT_MENUOPEN] then
+                    c:ToggleUI(true);
                 end
-            end
-        end);
-        c.paperDollFrame:HookScript("OnHide", function()
-            GQ_OPTIONS[c.OPT_MENUOPEN] = GqUiFrame.isOpen;
-            c:CloseQuickBars();
-        end);
-        InterfaceOptionsFrameOkay:HookScript("OnClick", function(self)
-            c:SaveCloakAndHelmet();
-        end);
+                c:SetSlotInfo();
+                c:SetPaperDollLabelText();
+                c:SetGqUiFramePosition();
 
-        GameMenuButtonMacros:HookScript("OnClick", function()
-            if not MacroFrame.gearQuipperHooked then
-                MacroNewButton:HookScript("OnClick", function()
-                    c.macroAction = {
-                        [c.FIELD_NAME] = c.MACROACTION_NEW,
-                        [c.FIELD_TYPE] = MacroFrame.selectedTab
-                    };
-                end);
-                MacroEditButton:HookScript("OnClick", function()
-                    c.macroAction = {
-                        [c.FIELD_NAME] = c.MACROACTION_EDIT,
-                        [c.FIELD_TYPE] = MacroFrame.selectedTab,
-                        [c.FIELD_ID] = MacroFrame.selectedMacro
-                    };
-                end);
-                MacroDeleteButton:HookScript("OnClick", function()
-                    c.macroAction = {
-                        [c.FIELD_NAME] = c.MACROACTION_DELETE,
-                        [c.FIELD_TYPE] = MacroFrame.selectedTab,
-                        [c.FIELD_ID] = MacroFrame.selectedMacro
-                    };
-                end);
-                MacroFrame.gearQuipperHooked = true;
-            end
-        end);
+                if c:IsSwitching() or c:IsInCombat() or c:IsDead() then
+                    c:LockUI();
+                else
+                    c:UnlockUI();
+                end
+            end);
+            c.paperDollFrame:HookScript("OnHide", function()
+                GQ_OPTIONS[c.OPT_MENUOPEN] = GqUiFrame.isOpen;
+                c:CloseQuickBars();
+            end);
+        end
 
-        local function ShowExtendedItemTooltip(self)
-            -- extend default tooltip
-            if GQ_OPTIONS[c.OPT_SHOWITEMTOOLTIP] and self and self:GetOwner() then
-                local ownerName = self:GetOwner():GetName();
-                if ownerName then
-                    local slotId = c:GetSlotId(ownerName:gsub("Character", ""));
+        if not c.uiHooked then
+            c.uiHooked = true;
+
+            local function ShowExtendedItemTooltip(tooltip)
+                -- GQ's own comparison tooltips are item tooltips too
+                if tooltip ~= GameTooltip then
+                    return;
+                end
+
+                local _, itemLink = tooltip:GetItem();
+                if c:IsSecret(itemLink) then
+                    itemLink = nil;
+                end
+
+                -- extend default tooltip
+                if GQ_OPTIONS[c.OPT_SHOWITEMTOOLTIP] then
+                    local owner = tooltip:GetOwner();
+                    local ownerName;
+                    if owner and owner.GetName and not (owner.IsForbidden and owner:IsForbidden()) then
+                        ownerName = owner:GetName();
+                    end
+                    local slotId;
+                    if ownerName and ownerName:find("^Character") then
+                        slotId = c:GetSlotId((ownerName:gsub("^Character", "")));
+                    end
+
                     if slotId then
                         -- inventory slot item tooltip
                         local setName = c:LoadCurrentSetName();
-                        local itemString = c:LoadSlot(slotId, setName);
-                        if setName and not (c:LoadPartialOption(setName) or c:LoadSlotState(slotId, setName)) and
-                            not c:IsSetItemOnSlot(slotId, itemString) then
-                            self:AddLine(" ");
-                            self:AddDoubleLine(c:FormatTextWithColor(c:GetText("Expected Item:"), "ff0000"),
-                                c:GetItemLink(itemString));
+                        if setName and (not c:LoadPartialOption(setName) or c:LoadSlotState(slotId, setName)) then
+                            local itemString = c:LoadSlot(slotId, setName);
+                            if not c:IsSetItemOnSlot(slotId, itemString) then
+                                tooltip:AddLine(" ");
+                                tooltip:AddDoubleLine(c:FormatTextWithColor(c:GetText("Expected Item:"), "ff0000"),
+                                    c:GetItemLink(itemString));
+                            end
                         end
-                    else
+                    elseif itemLink then
                         -- bag/bank slot item tooltip
-                        local name, itemLink = self:GetItem();
                         local itemString = c:GetItemString(itemLink);
-                        if itemString then
+                        if not c:IsEmpty(itemString) then
                             local sets, spacing = c:GetItemSets(itemString);
                             if sets and getn(sets) > 0 then
-                                self:AddLine(" ");
-                                self:AddDoubleLine(c:GetText("GearQuipper set(s):"), table.concat(sets, ", "));
+                                tooltip:AddLine(" ");
+                                tooltip:AddDoubleLine(c:GetText("GearQuipper set(s):"), table.concat(sets, ", "));
                                 spacing = true;
                             end
                             if GQ_OPTIONS[c.OPT_SET_ITEM_COMPARISON_SHOW_HINT] then
-                                if getn(c:GetItemSlots(itemString)) > 0 then
+                                local itemSlots = c:GetItemSlots(itemString);
+                                if itemSlots and getn(itemSlots) > 0 then
                                     if not spacing then
-                                        self:AddLine(" ");
+                                        tooltip:AddLine(" ");
                                     end
-                                    self:AddLine(c:GetText("Press L-Alt to cycle through sets."));
+                                    tooltip:AddLine(c:GetText("Press L-Alt to cycle through sets."));
                                 end
                             end
                         end
                     end
                 end
-            end
 
-            -- load custom tooltips
-            if GQ_OPTIONS[c.OPT_SET_ITEM_COMPARISON] then
-                local itemName, itemLink = self:GetItem();
-                if itemLink then
+                -- load custom tooltips
+                if GQ_OPTIONS[c.OPT_SET_ITEM_COMPARISON] and itemLink then
                     local comparisonSetName = c:LoadComparisonSetName();
                     if comparisonSetName then
                         c:ShowSetItemComparison(itemLink, comparisonSetName);
@@ -135,56 +135,37 @@ function c:InitUI(paperDollFrame)
                     end
                 end
             end
-        end
 
-        local function IsEmptyInventorySlotTooltip(...)
-            for i = 1, select("#", ...) do
-                local region = select(i, ...)
-                if region and region:GetObjectType() == "FontString" then
-                    local text = region:GetText() -- string or nil
-                    if text then
-                        return c:TableContains(c:GetAllInventoryTypes(), text);
-                    end
-                end
-            end
-        end
+            c:AddItemTooltipPostCall(function(tooltip, data)
+                ShowExtendedItemTooltip(tooltip);
+            end);
 
-        GameTooltip:HookScript("OnShow", function(self)
-            -- TODO: get slotId (beware: trinkets, rings) and pass it to the tooltip function
-            self.gqEmptyInventorySlot = IsEmptyInventorySlotTooltip(self:GetRegions());
-        end);
+            GameTooltip:HookScript("OnHide", function()
+                c:HideGqTooltips();
+            end);
 
-        GameTooltip:HookScript("OnTooltipSetItem", function(self)
-            ShowExtendedItemTooltip(self);
-        end);
-
-        GameTooltip:HookScript("OnHide", function()
-            c:HideGqTooltips();
-        end);
-
-        -- hook character slots for quickslots on empty slot
-        for slotId, slotName in pairs(c:GetSlotInfo()) do
-            local frame = _G["Character" .. slotName];
-            if frame then
-                frame:HookScript("OnClick", function(self, button)
-                    if button == "LeftButton" then
-                        if self.quickbar then
-                            self.quickbar:Hide();
-                            self.quickbar = nil;
-                        elseif slotId == INVSLOT_AMMO or c:GetItemString(slotId) == c.VALUE_NONE then
-                            c:CloseQuickBars();
-                            self.quickbar = c:OpenQuickBar(slotId);
+            -- hook character slots for quickslots on empty slot
+            for slotId, slotName in pairs(c:GetSlotInfo()) do
+                local frame = _G["Character" .. slotName];
+                if frame then
+                    frame:HookScript("OnClick", function(self, button)
+                        if button == "LeftButton" then
+                            if self.quickbar then
+                                self.quickbar:Hide();
+                                self.quickbar = nil;
+                            elseif slotId == INVSLOT_AMMO or c:GetItemString(slotId) == c.VALUE_NONE then
+                                c:CloseQuickBars();
+                                self.quickbar = c:OpenQuickBar(slotId);
+                            end
                         end
-                    end
-                end)
+                    end)
+                end
             end
         end
 
         c:HookBlizzardFrameScripts();
         c:HookCharacterStatsFrameScripts();
         c:InitUiFrame();
-
-        c:CreateSecureActionButtons();
 
         C_Timer.After(2, function()
             c:ToggleWatermark(GQ_OPTIONS[c.OPT_SHOW_WATERMARK]);
@@ -200,11 +181,8 @@ function c:ToggleWatermark(value)
         end
 
         c.watermark = CreateFrame("CheckButton", "GQ_Watermark", cmb);
-        c.watermark:SetPropagateKeyboardInput(true);
-        c.watermark:SetPoint("CENTER", 2, -2);
         c.watermark:SetFrameStrata("MEDIUM");
         c.watermark:EnableMouse(false);
-        c.watermark:SetSize(14, 10);
         c.watermark:SetAllPoints();
 
         c.watermark.fontString = c.watermark:CreateFontString("GQ_Watermark_FontString", "ARTWORK");
@@ -213,7 +191,7 @@ function c:ToggleWatermark(value)
         c.watermark.fontString:SetText("GQ");
     end
 
-    if value == true or not value then
+    if value then
         c.watermark:Show();
     else
         c.watermark:Hide();
@@ -240,67 +218,46 @@ function c:HookBlizzardFrameScripts()
     end
 end
 
+-- Right edge of the character window including its side tabs and the GQ panel, in the units of targetFrame.
+local function GetCharacterWindowRight(targetFrame)
+    local right = GetFrameEdge(CharacterFrame, "GetRight", targetFrame);
+    if right then
+        local tabs = CharacterFrame.ModeTabs;
+        if tabs and tabs:IsVisible() then
+            right = right + tabs:GetWidth() * tabs:GetEffectiveScale() / targetFrame:GetEffectiveScale();
+        end
+        if GqUiFrame:IsVisible() then
+            local gqRight = GetFrameEdge(GqUiFrame, "GetRight", targetFrame);
+            if gqRight and gqRight > right then
+                right = gqRight;
+            end
+        end
+    end
+    return right;
+end
+
 function c:SetFramePositions(norepeat)
-    local xOffset = 0;
-
-    -- mail
-    local mailFrame = _G["MailFrame"];
-    if mailFrame and mailFrame:IsVisible() then
-        xOffset = xOffset + mailFrame:GetWidth();
-    end
-
-    -- spellbook
-    local spellbookFrame = _G["SpellBookFrame"];
-    if spellbookFrame and spellbookFrame:IsVisible() then
-        xOffset = xOffset + spellbookFrame:GetWidth();
-    end
-
-    -- character
     local characterFrame = _G["CharacterFrame"];
-    if characterFrame and characterFrame:IsVisible() then
-        xOffset = xOffset + characterFrame:GetWidth() - 15;
+    if not (characterFrame and characterFrame:IsVisible()) or c:ReadState(InCombatLockdown) then
+        return;
     end
 
-    -- GQ
-    if GqUiFrame:IsVisible() then
-        xOffset = xOffset + GqUiFrame:GetWidth() - 20;
-    end
-
-    -- extended character stats (addon)
-    local ecsFrame = _G[c:GetCharacterStatsFrameNames()[1]];
-    if ecsFrame and ecsFrame:IsVisible() then
-        xOffset = xOffset + ecsFrame:GetWidth();
-    end
-
-    -- elvui wrath armory (addon)
-    local elvUiWaFrame = _G[c:GetCharacterStatsFrameNames()[3]];
-    if elvUiWaFrame and elvUiWaFrame:IsVisible() then
-        xOffset = xOffset + elvUiWaFrame:GetWidth();
-    end
-
-    -- crafting
-    local craftFrame, tradeSkillFrame = _G["CraftFrame"], _G["TradeSkillFrame"];
-    if craftFrame and craftFrame:IsVisible() then
-        craftFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", xOffset, -104);
-        xOffset = xOffset + craftFrame:GetWidth() - 20;
-    elseif tradeSkillFrame and tradeSkillFrame:IsVisible() and tradeSkillFrame:GetLeft() > characterFrame:GetLeft() then
-        tradeSkillFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", xOffset, -104);
-        xOffset = xOffset + tradeSkillFrame:GetWidth() - 20;
-    end
-
-    -- bank
+    -- bank: moved right of the GQ panel (and back when the panel closes), only when Blizzard placed it to the
+    -- right of the character window
     local bankFrame = _G["BankFrame"];
-    if bankFrame and bankFrame:IsVisible() then
-        bankFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", xOffset, -104);
+    if bankFrame and bankFrame:IsVisible() and (GqUiFrame:IsVisible() or bankFrame.gqMoved) then
+        local bankLeft, bankTop = GetFrameEdge(bankFrame, "GetLeft"), GetFrameEdge(bankFrame, "GetTop");
+        local characterLeft = GetFrameEdge(characterFrame, "GetLeft", bankFrame);
+        local xOffset = GetCharacterWindowRight(bankFrame);
+        local parentTop = GetFrameEdge(UIParent, "GetTop", bankFrame);
+        if bankLeft and bankTop and characterLeft and xOffset and parentTop and bankLeft > characterLeft then
+            bankFrame:ClearAllPoints();
+            bankFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", xOffset + FRAME_SPACING, bankTop - parentTop);
+            bankFrame.gqMoved = GqUiFrame:IsVisible();
+        end
     end
 
-    -- talents
-    local talentFrame = _G["PlayerTalentFrame"];
-    if talentFrame and talentFrame:IsVisible() then
-        talentFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", xOffset, -104);
-    end
-
-    -- tradeskillframe and craftingframe seem to do some async server requests which cause repositioning to fail at first try
+    -- the UI panel manager anchors panels after their OnShow, so position once more on the next frame
     if not norepeat then
         C_Timer.After(0.001, function()
             c:SetFramePositions(true);
@@ -330,7 +287,17 @@ end
 
 function c:CreatePaperDollButton()
     local button = CreateFrame("Button", "GQ_PaperDollButton", c.paperDollFrame);
-    button:SetPoint("TOPRIGHT", c.paperDollFrame, "TOPRIGHT", -40, -45);
+    if GetPaperDollAnchor() ~= c.paperDollFrame then
+        -- top right of the paper doll pane, above the right slot column and below the level strip
+        button:SetPoint("TOPRIGHT", GetPaperDollAnchor(), "TOPRIGHT", -20, -38);
+    else
+        button:SetPoint("TOPRIGHT", c.paperDollFrame, "TOPRIGHT", -40, -45);
+    end
+    -- the character model scene is mouse enabled and sits above the paper doll's own level
+    local itemsFrame = _G["PaperDollItemsFrame"];
+    if itemsFrame then
+        button:SetFrameLevel(itemsFrame:GetFrameLevel() + 1);
+    end
     button:SetWidth(50);
     button:SetHeight(20);
     button:SetText("GQ");
@@ -340,7 +307,7 @@ function c:CreatePaperDollButton()
         c:ToggleUI();
     end);
 
-    local ntex = button:CreateTexture("GQ_PaperDollButtonIconTexture");
+    local ntex = button:CreateTexture();
     ntex:SetTexture("Interface/Buttons/UI-Panel-Button-Up");
     ntex:SetTexCoord(0, 0.625, 0, 0.6875);
     ntex:SetAllPoints();
@@ -364,11 +331,6 @@ function c:CreatePaperDollButton()
     dtex:SetAllPoints();
     button:SetDisabledTexture(dtex);
 
-    local S = c:GetElvUiSkinModule();
-    if S then
-        S:HandleButton(button);
-    end
-
     return button;
 end
 
@@ -382,7 +344,7 @@ end
 
 function c:CreatePaperDollLabel()
     local label = CreateFrame("Frame", "GQ_PaperDollLabel", c.paperDollFrame);
-    label:SetPoint("CENTER", c.paperDollFrame, "CENTER", 0, -5);
+    label:SetPoint("CENTER", GetPaperDollAnchor(), "CENTER", 0, -5);
     label:SetFrameStrata("HIGH");
     label:SetWidth(200);
     label:SetHeight(20);
@@ -450,9 +412,9 @@ function c:ShowSetItemComparison(itemLink, setName, gameTooltipOwner)
 
             local tt = c:GetGqTooltip(i);
             if i == 1 then
-                tt:SetOwner(GameTooltip);
+                tt:SetOwner(GameTooltip, "ANCHOR_NONE");
             else
-                tt:SetOwner(c:GetGqTooltip(i - 1));
+                tt:SetOwner(c:GetGqTooltip(i - 1), "ANCHOR_NONE");
             end
 
             if not c:IsEmpty(setItemLink) then
@@ -483,7 +445,8 @@ function c:ShowSetItemComparison(itemLink, setName, gameTooltipOwner)
             tt:Show();
 
             tt:ClearAllPoints();
-            if GameTooltip:GetLeft() and GameTooltip:GetLeft() < 250 then
+            local gameTooltipLeft = GetFrameEdge(GameTooltip, "GetLeft");
+            if gameTooltipLeft and gameTooltipLeft < 250 then
                 if i == 1 then
                     tt:SetPoint("TOPLEFT", tt:GetOwner(), "TOPRIGHT");
                 else
@@ -501,6 +464,18 @@ function c:ShowSetItemComparison(itemLink, setName, gameTooltipOwner)
     end
 end
 
+local function AddSetFromDialog(setName)
+    setName = c:Trim(setName);
+    if c:IsValidSetName(setName) then
+        c:SaveSet(setName, false);
+        c:UpdateBroker();
+    else
+        c:Println(c:GetText(
+            "Invalid set name: \"%s\". Set names must [1] not be empty, [2] be unique (case insensitive) and [3] not contain \"$\" (reserved).",
+            setName));
+    end
+end
+
 function c:ShowAddSetDialog()
     StaticPopupDialogs["GQ_DIALOG_ADDSET"] = StaticPopupDialogs["GQ_DIALOG_ADDSET"] or {
         text = c:GetText("Enter a name for this set:"),
@@ -510,30 +485,15 @@ function c:ShowAddSetDialog()
         maxLetters = 30,
         EditBoxOnEnterPressed = function(self)
             local parent = self:GetParent();
-            local setName = c:Trim(self:GetText());
-            if c:IsValidSetName(setName) then
-                c:SaveSet(setName, false);
-                c:UpdateBroker();
-            else
-                c:Println(c:GetText(
-                    "Invalid set name: \"%s\". Set names must [1] not be empty, [2] be unique (case insensitive) and [3] not contain \"$\" (reserved).",
-                    setName));
-            end
+            AddSetFromDialog(self:GetText());
             parent:Hide();
         end,
         EditBoxOnEscapePressed = function(self)
             self:GetParent():Hide();
         end,
         OnAccept = function(self, data, data2)
-            local setName = c:Trim(self.editBox:GetText());
-            if c:IsValidSetName(setName) then
-                c:SaveSet(setName, false);
-                c:UpdateBroker();
-            else
-                c:Println(c:GetText(
-                    "Invalid set name: \"%s\". Set names must [1] not be empty, [2] be unique (case insensitive) and [3] not contain \"$\" (reserved).",
-                    setName));
-            end
+            local editBox = self.GetEditBox and self:GetEditBox() or self.editBox;
+            AddSetFromDialog(editBox:GetText());
         end,
         timeout = 0,
         whileDead = true,
@@ -550,9 +510,6 @@ function c:ShowRemoveSetDialog(setName)
             text = c:GetText("Do you really want to remove \"%s\"?", "%s"),
             button1 = c:GetText(YES),
             button2 = c:GetText(NO),
-            EditBoxOnEscapePressed = function(self)
-                self:GetParent():Hide();
-            end,
             OnAccept = function(self, data)
                 if data and tContains(c:LoadSetNames(), data) then
                     c:RemoveSet(data);
@@ -567,7 +524,7 @@ function c:ShowRemoveSetDialog(setName)
             preferredIndex = 3
         };
 
-        local dialog = StaticPopup_Show("GQ_DIALOG_REMOVESET", setName);
+        local dialog = StaticPopup_Show("GQ_DIALOG_REMOVESET", setName, nil, setName);
         if dialog then
             dialog.data = setName;
         end
@@ -579,13 +536,9 @@ function c:ShowResetDialog()
         text = c:GetText("This will reset GearQuipper to defaults. All your sets will be lost.\n\nAre you sure?"),
         button1 = c:GetText("Reset"),
         button2 = c:GetText("Cancel"),
-        OnEscapePressed = function()
-            self:Hide();
-        end,
         OnAccept = function()
             GQ_OPTIONS = {};
             GQ_DATA = {};
-            GQ_AUX = {};
             c:ToggleUI(false);
             c:Init();
             c:CreateDefaultSet();
@@ -599,110 +552,6 @@ function c:ShowResetDialog()
     StaticPopup_Show("GQ_DIALOG_RESET");
 end
 
-function c:ShowLoadSaveActionSlotsDialog(data)
-    StaticPopupDialogs["GQ_DIALOG_LOADSAVEACTIONSLOTS"] = StaticPopupDialogs["GQ_DIALOG_LOADSAVEACTIONSLOTS"] or {
-        text = c:GetText(
-            "Your current action configuration differs from \"%s\".\n\nClick \"Save\" to replace the action slots saved in \"%s\" with your current ones\n\nor\n\nClick \"Load\" to replace your current action slots by the actions saved in \"%s\".",
-            c:LoadCurrentSetName(), c:LoadCurrentSetName(), c:LoadCurrentSetName()),
-        button1 = SAVE,
-        button2 = CANCEL,
-        button3 = c:GetText("Load"),
-        OnAccept = function(self, data, data2)
-            c:SaveActionConfiguration(c:LoadCurrentSetName());
-        end,
-        OnCancel = function(self, data, data2)
-            if data then
-                data:SetChecked(false);
-            end
-        end,
-        OnAlt = function(self, data, data2)
-            c:LoadActionConfiguration(c:LoadCurrentSetName());
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3
-    };
-
-    local dialog = StaticPopup_Show("GQ_DIALOG_LOADSAVEACTIONSLOTS");
-    dialog.data = data;
-end
-
-function c:ShowDeleteScriptDialog(script)
-    if script then
-        StaticPopupDialogs["GQ_DIALOG_DELETESCRIPT"] = StaticPopupDialogs["GQ_DIALOG_DELETESCRIPT"] or {
-            text = c:GetText("Do you really want to delete \"%s\"?", "%s"),
-            button1 = c:GetText(YES),
-            button2 = c:GetText(NO),
-            OnAccept = function(self, data)
-                if data then
-                    c:DeleteScript(data);
-                    c:ClearScriptEditorFields();
-                    c:RefreshScripts();
-                end
-            end,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
-            preferredIndex = 3
-        };
-
-        local dialog = StaticPopup_Show("GQ_DIALOG_DELETESCRIPT", script[c.FIELD_NAME]);
-        if dialog then
-            dialog.data = script;
-        end
-    end
-end
-
--- gearquipper:ShowAcceptGqActionSlotManagementDialog()
-function c:ShowAcceptGqActionSlotManagementDialog(acceptFunc, cancelFunc)
-    StaticPopupDialogs["GQ_DIALOG_ACCEPTGQACTIONSLOTMANAGEMENT"] =
-        StaticPopupDialogs["GQ_DIALOG_ACCEPTGQACTIONSLOTMANAGEMENT"] or {
-            text = c:GetText(
-                "You changed your talents.\n\nDo you want your action bars to be managed by GearQuipper or Blizzard (default)?\n\nIf you choose GearQuipper, your action bars will be saved with your equipment sets, not with your talents.\n\nIf you choose Blizzard, GearQuipper action slot management will be disabled.\n\nYou will not be asked again, but you can change this behaviour later in the GQ interface options."),
-            button1 = c:GetText("GearQuipper"),
-            button2 = c:GetText("Blizzard (default)"),
-            OnAccept = function()
-                acceptFunc();
-            end,
-            OnCancel = function()
-                cancelFunc();
-            end,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
-            preferredIndex = 1
-        };
-    StaticPopup_Show("GQ_DIALOG_ACCEPTGQACTIONSLOTMANAGEMENT");
-end
-
-function c:ShowSaveScriptAfterClosingDialog(script, unsavedScriptText)
-    if script then
-        StaticPopupDialogs["GQ_DIALOG_SAVESCRIPTAFTERCLOSING"] =
-            StaticPopupDialogs["GQ_DIALOG_SAVESCRIPTAFTERCLOSING"] or {
-                text = c:GetText(
-                    "Warning! You did not save your script.\n\nWe could not prevent Blizzard from closing the window, but we can still save your script for you.\n\nDo you want to save your script \"%s\" now?",
-                    "%s"),
-                button1 = c:GetText(YES),
-                button2 = c:GetText(NO),
-                OnAccept = function(self, data)
-                    if data then
-                        c:SaveScript(script, unsavedScriptText);
-                    end
-                end,
-                timeout = 0,
-                whileDead = true,
-                hideOnEscape = true,
-                preferredIndex = 3
-            };
-
-        local dialog = StaticPopup_Show("GQ_DIALOG_SAVESCRIPTAFTERCLOSING", script[c.FIELD_NAME]);
-        if dialog then
-            dialog.data = script;
-        end
-    end
-end
-
 function c:SetSlotInfo(slotId, color)
     if not slotId then
         for slotId, _ in pairs(c:GetSlotInfo()) do
@@ -711,9 +560,13 @@ function c:SetSlotInfo(slotId, color)
         return;
     else
         local slot = _G["Character" .. c:GetSlotInfo()[slotId]];
+        if not slot then
+            return;
+        end
         if not slot.gqTex then
             slot.slotId = slotId;
-            slot.gqTex = slot:CreateTexture(slot:GetName() .. "IconTexture", "OVERLAY");
+            -- unnamed: "<slot>IconTexture" is Blizzard's own icon global on the ammo slot
+            slot.gqTex = slot:CreateTexture(nil, "OVERLAY");
             slot.gqTex:SetAllPoints();
         end
 
@@ -733,17 +586,13 @@ function c:SetSlotInfo(slotId, color)
 
         if color == "red" then
             slot.gqTex:SetColorTexture(1, 0, 0, 0.2);
-            slot.gqInfo = c:GetText("|cffff0000%s|r %s", c:GetText("Expected Item:"), c:GetItemLink(c:LoadSlot(slotId)));
+        elseif color == "white" then
+            slot.gqTex:SetColorTexture(1, 1, 1, 0.2);
+        elseif color == "blue" then
+            slot.gqTex:SetColorTexture(0, 0, 1, 0.2);
         else
-            slot.gqInfo = nil;
-            if color == "white" then
-                slot.gqTex:SetColorTexture(1, 1, 1, 0.2);
-            elseif color == "blue" then
-                slot.gqTex:SetColorTexture(0, 0, 1, 0.2);
-            else
-                -- "green" (actually empty)
-                slot.gqTex:SetColorTexture(0, 0, 0, 0);
-            end
+            -- "green" (actually empty)
+            slot.gqTex:SetColorTexture(0, 0, 0, 0);
         end
     end
 end
@@ -752,7 +601,10 @@ function c:GetSlotStateBoxes()
     if not slotStateBoxes then
         slotStateBoxes = {};
         for slotId, slotName in pairs(c:GetSlotInfo()) do
-            slotStateBoxes[slotId] = c:CreateSlotStateBox(slotName, _G["Character" .. slotName]);
+            local slot = _G["Character" .. slotName];
+            if slot then
+                slotStateBoxes[slotId] = c:CreateSlotStateBox(slotName, slot);
+            end
         end
     end
     return slotStateBoxes;
@@ -794,11 +646,7 @@ function c:CreateSlotStateBox(slotName, parent)
         end
         c:SetSlotInfo(slotId, "green");
     end);
-
-    local S = c:GetElvUiSkinModule();
-    if S then
-        S:HandleCheckBox(checkbutton);
-    end
+    checkbutton:Hide();
 
     return checkbutton;
 end
@@ -811,26 +659,30 @@ function c:GetSlotState(slotId)
     return c:GetSlotStateBoxes()[slotId]:GetChecked();
 end
 
+-- adds frame to result when the container slot holds no item of the set (empty slots included)
+local function AddIfNotInSet(result, frame, itemStrings, bagId, slotId)
+    if frame and bagId and slotId then
+        local itemString = c:GetItemString(c:GetContainerItemLink(bagId, slotId));
+        if c:IsEmpty(itemString) or not c:TableContains(itemStrings, itemString) then
+            tinsert(result, frame);
+        end
+    end
+end
+
 local function GetContainersForItems(itemStrings)
     local result = {};
     if itemStrings then
         if c:IsAddonEnabled("AdiBags") then
             for slotId = 0, 255 do
                 local frame = _G["AdiBagsItemButton" .. slotId];
-                if frame and frame.bag and frame.slot then
-                    local itemString = c:GetItemString(GetContainerItemLink(frame.bag, frame.slot));
-                    if c:IsEmpty(itemString) or not c:TableContains(itemStrings, itemString) then
-                        tinsert(result, frame);
-                    end
+                if frame then
+                    AddIfNotInSet(result, frame, itemStrings, frame.bag, frame.slot);
                 end
 
                 if c:IsAtBank() then
-                    local frame = _G["AdiBagsBankItemButton" .. slotId];
-                    if frame and frame.bag and frame.slot then
-                        local itemString = c:GetItemString(GetContainerItemLink(frame.bag, frame.slot));
-                        if c:IsEmpty(itemString) or not c:TableContains(itemStrings, itemString) then
-                            tinsert(result, frame);
-                        end
+                    local bankFrame = _G["AdiBagsBankItemButton" .. slotId];
+                    if bankFrame then
+                        AddIfNotInSet(result, bankFrame, itemStrings, bankFrame.bag, bankFrame.slot);
                     end
                 end
             end
@@ -838,18 +690,12 @@ local function GetContainersForItems(itemStrings)
             -- I'm just guessing here...
             for invId = 0, 5 do
                 for bagId = 0, 8 do
-                    for slotId = 1, MAX_CONTAINER_ITEMS do
+                    for slotId = 1, MAX_ITEMS_PER_CONTAINER do
                         local frameName = "ARKINV_Frame" .. invId .. "ScrollContainerBag" .. bagId .. "Item" .. slotId;
                         local arkFrame = _G[frameName];
-                        if arkFrame then
-                            local arkData = arkFrame.ARK_Data;
-                            if arkData then
-                                local itemString = c:GetItemString(
-                                    GetContainerItemLink(arkData.blizzard_id, arkData.slot_id));
-                                if c:IsEmpty(itemString) or not c:TableContains(itemStrings, itemString) then
-                                    tinsert(result, arkFrame);
-                                end
-                            end
+                        if arkFrame and arkFrame.ARK_Data then
+                            AddIfNotInSet(result, arkFrame, itemStrings, arkFrame.ARK_Data.blizzard_id,
+                                arkFrame.ARK_Data.slot_id);
                         end
                     end
                 end
@@ -857,13 +703,12 @@ local function GetContainersForItems(itemStrings)
         elseif c:IsAddonEnabled("TBag") and TInvItm and TInvItm[TInvFrame.playerid] then
             -- I'm just guessing here...
             for bagId = 1, 13 do
-                for slotId = 1, MAX_CONTAINER_ITEMS do
+                for slotId = 1, MAX_ITEMS_PER_CONTAINER do
                     local match = false;
                     local tbagFrame = _G["TInvainerFrame" .. bagId .. "Item" .. slotId];
                     if tbagFrame then
                         if TInvItm[TInvFrame.playerid][bagId] and TInvItm[TInvFrame.playerid][bagId][slotId] and
                             TInvItm[TInvFrame.playerid][bagId][slotId]["il"] then
-                            local itemString = TInvItm[TInvFrame.playerid][bagId][slotId]["il"]; -- .. ":" .. UnitLevel("player") .. ":::::::::"; -- messy workaround
                             local itemName = TInvItm[TInvFrame.playerid][bagId][slotId]["in"];
                             if not itemName then
                                 break
@@ -882,13 +727,12 @@ local function GetContainersForItems(itemStrings)
                     end
                 end
             end
-        elseif ElvUI then
-            -- I'm just guessing here...
-            for bagId = -8, 8 do
-                for slotId = 1, MAX_CONTAINER_ITEMS do
-                    local frameName = "ElvUI_ContainerFrameBag" .. bagId .. "Slot" .. slotId;
-                    if _G[frameName] and _G[frameName].itemLink then
-                        local itemString = c:GetItemString(_G[frameName].itemLink);
+        elseif c:IsAddonEnabled("Bagnon") then
+            for bagId = 0, NUM_BAG_SLOTS do
+                for slotId = 1, MAX_ITEMS_PER_CONTAINER do
+                    local frameName = "ContainerFrame" .. bagId .. "Item" .. slotId;
+                    if _G[frameName] and _G[frameName].info then
+                        local itemString = c:GetItemString(_G[frameName].info.link);
                         if c:IsEmpty(itemString) or not c:TableContains(itemStrings, itemString) then
                             tinsert(result, _G[frameName]);
                         end
@@ -896,56 +740,27 @@ local function GetContainersForItems(itemStrings)
                 end
             end
         else
-            -- default player bags / bagnon containers
-            for bagId = 0, NUM_BAG_SLOTS do
-                local bagSize = GetContainerNumSlots(bagId);
-
-                for slotId = 1, MAX_CONTAINER_ITEMS do
-                    if c:IsAddonEnabled("Bagnon") then
-                        local frameName = "ContainerFrame" .. bagId .. "Item" .. slotId;
-                        if _G[frameName] and _G[frameName].info then
-                            local itemString = c:GetItemString(_G[frameName].info.link);
-                            if c:IsEmpty(itemString) or not c:TableContains(itemStrings, itemString) then
-                                tinsert(result, _G[frameName]);
-                            end
-                        end
-                    else
-                        local frameName = "ContainerFrame" .. (bagId + 1) .. "Item" .. (bagSize - slotId + 1);
-                        if _G[frameName] then
-                            local itemString = c:GetItemString(GetContainerItemLink(bagId, slotId));
-                            if c:IsEmpty(itemString) or not c:TableContains(itemStrings, itemString) then
-                                tinsert(result, _G[frameName]);
+            -- default player bags: item buttons are pooled and unnamed, each knows its bag and slot
+            if ContainerFrameUtil_EnumerateContainerFrames then
+                for _, containerFrame in ContainerFrameUtil_EnumerateContainerFrames() do
+                    if containerFrame:IsShown() and containerFrame.EnumerateValidItems then
+                        for _, itemButton in containerFrame:EnumerateValidItems() do
+                            if itemButton then
+                                AddIfNotInSet(result, itemButton, itemStrings, itemButton:GetBagID(),
+                                    itemButton:GetID());
                             end
                         end
                     end
                 end
             end
 
-            if c:IsAtBank() then
-                -- default bank container
-                for bankSlotId = 1, 28 do
-                    local frameName = "BankFrameItem" .. bankSlotId;
-                    if _G[frameName] then
-                        local itemString = c:GetItemString(GetContainerItemLink(BANK_CONTAINER, bankSlotId));
-                        if c:IsEmpty(itemString) or not c:TableContains(itemStrings, itemString) then
-                            tinsert(result, _G[frameName]);
-                        end
-                    end
-                end
-
-                -- default bank bags
-                for bagId = NUM_BAG_SLOTS + 1, NUM_BAG_SLOTS + NUM_BANKBAGSLOTS do
-                    local bagSize = GetContainerNumSlots(bagId);
-                    for slotId = 1, bagSize do
-                        if _G["BankFrame"] and _G["BankFrame"]:IsVisible() then
-                            local frameName = "ContainerFrame" .. (bagId + 1) .. "Item" .. (bagSize - slotId + 1);
-                            if _G[frameName] then
-                                local itemString = c:GetItemString(GetContainerItemLink(bagId, slotId));
-                                if c:IsEmpty(itemString) or not c:TableContains(itemStrings, itemString) then
-                                    tinsert(result, _G[frameName]);
-                                end
-                            end
-                        end
+            -- default bank (tabbed, pooled item buttons)
+            local bankPanel = _G["BankFrame"] and _G["BankFrame"].BankPanel;
+            if bankPanel and bankPanel:IsVisible() and bankPanel.EnumerateValidItems then
+                for itemButton in bankPanel:EnumerateValidItems() do
+                    if itemButton.GetBankTabID and itemButton.GetContainerSlotID then
+                        AddIfNotInSet(result, itemButton, itemStrings, itemButton:GetBankTabID(),
+                            itemButton:GetContainerSlotID());
                     end
                 end
             end
@@ -970,7 +785,10 @@ function c:HighlightItemsEquipped(itemStrings, setName)
     else
         -- set
         for id, name in pairs(c:GetSlotInfo()) do
-            _G["Character" .. name]:SetAlpha(0.35);
+            local slot = _G["Character" .. name];
+            if slot then
+                slot:SetAlpha(0.35);
+            end
         end
         for _, itemString in pairs(itemStrings) do
             local list = c:IsItemEquipped(itemString);
@@ -986,121 +804,15 @@ function c:HighlightItemsEquipped(itemStrings, setName)
 end
 
 function c:HighlightItemsInBags(itemStrings)
-    if c:IsAddonEnabled("AdiBags") then
-        -- reset alpha
-        -- I'm just guessing here...
-        for slotId = 0, 255 do
-            ResetFrameAlpha("AdiBagsItemButton" .. slotId);
-        end
-        if c:IsAtBank() then
-            for slotId = 0, 255 do
-                ResetFrameAlpha("AdiBagsBankItemButton" .. slotId);
-            end
-        end
-    elseif c:IsAddonEnabled("ArkInventory") then
-        -- reset alpha
-        -- I'm just guessing here...
-        for invId = 0, 5 do
-            for bagId = 0, 8 do
-                for slotId = 1, MAX_CONTAINER_ITEMS do
-                    ResetFrameAlpha("ARKINV_Frame" .. invId .. "ScrollContainerBag" .. bagId .. "Item" .. slotId);
-                end
-            end
-        end
-    elseif c:IsAddonEnabled("TBag") then
-        -- reset alpha
-        -- I'm just guessing here...
-        for bagId = 1, 13 do
-            for slotId = 1, MAX_CONTAINER_ITEMS do
-                ResetFrameAlpha("TInvainerFrame" .. bagId .. "Item" .. slotId);
-            end
-        end
-    elseif ElvUI then
-        -- reset alpha
-        -- I'm just guessing here...
-        for bagId = -8, 8 do
-            for slotId = 1, MAX_CONTAINER_ITEMS do
-                ResetFrameAlpha("ElvUI_ContainerFrameBag" .. bagId .. "Slot" .. slotId);
-            end
-        end
-    else
-        -- default / bagnon frames
-        -- reset alpha
-        for bagId = 0, 24 do
-            for slotId = 1, MAX_CONTAINER_ITEMS do
-                ResetFrameAlpha("ContainerFrame" .. bagId .. "Item" .. slotId);
-            end
-        end
-
-        if c:IsAtBank() then
-            for frameId = 1, 28 do
-                ResetFrameAlpha("BankFrameItem" .. frameId);
-            end
-        end
+    -- reset alpha of every frame dimmed before (pooled buttons may have been hidden or reused since)
+    for frame in pairs(dimmedBagFrames) do
+        frame:SetAlpha(1);
     end
+    wipe(dimmedBagFrames);
 
     -- set alpha
     for _, frame in ipairs(GetContainersForItems(itemStrings)) do
         frame:SetAlpha(0.35);
-    end
-end
-
------ experimental -----
-
-function c:CreateSecureActionButtons()
-    for _, setName in ipairs(c:LoadSetNames()) do
-        local macrotext;
-
-        local mainHandItem = c:LoadSlot(INVSLOT_MAINHAND, setName);
-        if c:IsEmpty(mainHandItem) then
-            macrotext = string.format("/unequipslot %s", INVSLOT_MAINHAND);
-        else
-            macrotext = string.format("/equipslot %s %s", INVSLOT_MAINHAND, c:GetItemName(mainHandItem));
-        end
-
-        local offHandItem = c:LoadSlot(INVSLOT_OFFHAND, setName);
-        if c:IsEmpty(offHandItem) then
-            macrotext = string.format("/unequipslot %s", INVSLOT_OFFHAND);
-        else
-            macrotext = string.format("/equipslot %s %s", INVSLOT_OFFHAND, c:GetItemName(offHandItem));
-        end
-
-        local rangedItem = c:LoadSlot(INVSLOT_RANGED, setName);
-        if c:IsEmpty(rangedItem) then
-            macrotext = string.format("/unequipslot %s", INVSLOT_RANGED);
-        else
-            macrotext = string.format("/equipslot %s %s", INVSLOT_RANGED, c:GetItemName(rangedItem));
-        end
-
-        c:SetSecureAction(setName, macrotext);
-    end
-end
-
-function c:CreateSecureActionButton(setName)
-    if setName then
-        if not secureActionButtons[setName] then
-            local button = CreateFrame("Button", "GQ_SecureActionButton_" .. setName, UIParent,
-                "SecureActionButtonTemplate");
-            button:RegisterForClicks("AnyUp");
-            button:SetAttribute("type", "macro");
-            secureActionButtons[setName] = button;
-        end
-        return secureActionButtons[setName];
-    end
-end
-
-function c:SetSecureAction(setName, macrotext)
-    if setName and macrotext then
-        local button = c:CreateSecureActionButton(setName);
-        button:SetAttribute("macrotext", macrotext);
-    end
-end
-
-function c:CallSecureAction(setName)
-    if secureActionButtons[setName] then
-        -- experimental
-        -- C_Timer.After(0.1, function()
-        --	secureActionButtons[setName]:Click();
-        -- end);
+        dimmedBagFrames[frame] = true;
     end
 end
