@@ -9,3 +9,6 @@ CC-Session-Logs/
 .venv/
 __pycache__/
 dist/
+
+# local project notes for Claude (may contain local paths)
+CLAUDE.md
