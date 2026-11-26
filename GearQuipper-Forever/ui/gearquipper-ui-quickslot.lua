@@ -417,6 +417,32 @@ local function ShowQuickBar(slotId, hover)
     end
 end
 
+-- Keeps the slot's tooltip clear of its open hover bar, the way Blizzard moves it beside its own flyout
+-- (EquipmentFlyout_SetTooltipAnchor): bottom-left corner just past the bar's far end.
+local function AnchorTooltipBesideBar(slotButton)
+    if not quickBars or not slotButton or not GameTooltip:IsOwned(slotButton) then
+        return;
+    end
+    for _, quickBar in pairs(quickBars) do
+        if quickBar.parent == slotButton and quickBar.hoverOpened and quickBar:IsShown() then
+            GameTooltip:ClearAllPoints();
+            GameTooltip:SetPoint("BOTTOMLEFT", quickBar.border, "BOTTOMRIGHT", 6, -6);
+            return;
+        end
+    end
+end
+
+-- The slot re-runs PaperDollItemSlotButton_OnEnter several times a second (its UpdateTooltip), which re-anchors the
+-- tooltip on the slot; a post-hook puts it back beside the bar each time.
+local tooltipHookInstalled;
+local function InstallTooltipHook()
+    if not tooltipHookInstalled and type(PaperDollItemSlotButton_OnEnter) == "function" then
+        hooksecurefunc("PaperDollItemSlotButton_OnEnter", AnchorTooltipBesideBar);
+        tooltipHookInstalled = true;
+    end
+end
+InstallTooltipHook();
+
 -- Hovering a paper-doll slot shows its bar (as EqManager does); click and pick-up keep working as in GQ.
 -- Holding the flyout modifier (Alt) leaves the slot to Blizzard's own flyout.
 function c:HoverQuickBar(slotId)
@@ -433,7 +459,11 @@ function c:HoverQuickBar(slotId)
             end
         end
     end
-    ShowQuickBar(slotId, true);
+    local quickBar = ShowQuickBar(slotId, true);
+    if quickBar then
+        InstallTooltipHook();
+        AnchorTooltipBesideBar(quickBar.parent);
+    end
 end
 
 local pendingOpens = {};

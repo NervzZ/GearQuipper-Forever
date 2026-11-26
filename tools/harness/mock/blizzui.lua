@@ -417,6 +417,11 @@ end
 H.extendClass("GameTooltip", {
     SetOwner = function(self, owner, anchor)
         P[self].owner, P[self].anchor = owner, anchor;
+        -- like the client: any anchor other than ANCHOR_NONE places the tooltip against its owner
+        P[self].points = {};
+        if anchor ~= "ANCHOR_NONE" then
+            P[self].points[1] = {"BOTTOMLEFT", owner, "TOPRIGHT", 0, 0};
+        end
         self:ClearLines();
     end,
     GetOwner = function(self)
@@ -513,6 +518,25 @@ ShoppingTooltip1 = CreateFrame("GameTooltip", "ShoppingTooltip1", UIParent, "Gam
 ShoppingTooltip2 = CreateFrame("GameTooltip", "ShoppingTooltip2", UIParent, "GameTooltipTemplate");
 P[ShoppingTooltip1].shown, P[ShoppingTooltip2].shown = false, false;
 GameTooltip.shoppingTooltips = {ShoppingTooltip1, ShoppingTooltip2};
+
+-- Blizzard's Camelot slot tooltip: the slot's OnEnter script is bound to the ORIGINAL function (XML function=), so a
+-- hooksecurefunc on the global only sees the periodic refresh (UpdateTooltip -> PaperDollItemSlotButton_OnUpdate),
+-- which looks the global up at run time.
+function PaperDollItemSlotButton_OnEnter(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
+    GameTooltip:SetInventoryItem("player", self:GetID());
+end
+local PaperDollItemSlotButton_OnEnter_Original = PaperDollItemSlotButton_OnEnter;
+for slotName in pairs(H.SLOT_IDS) do
+    local b = _G["Character" .. slotName];
+    b:SetScript("OnEnter", PaperDollItemSlotButton_OnEnter_Original);
+    b:SetScript("OnLeave", function()
+        GameTooltip:Hide();
+    end);
+    b.UpdateTooltip = function(self)
+        PaperDollItemSlotButton_OnEnter(self);
+    end;
+end
 
 -- The player hovers an item on the character sheet / in a bag: tooltip shown with the item.
 function H.hoverInventorySlot(slot)
