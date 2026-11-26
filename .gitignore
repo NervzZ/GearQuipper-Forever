@@ -1,0 +1,11 @@
+# original download + extracted copy (kept locally for reference)
+reference/
+*.zip
+
+# local tooling / logs / session files
+.claude/settings.local.json
+CC-Session-Logs/
+*.log
+.venv/
+__pycache__/
+dist/
