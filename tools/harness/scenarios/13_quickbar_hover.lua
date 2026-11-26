@@ -1,6 +1,7 @@
 -- (l) Quick bars on mouse-over: hovering a paper-doll slot shows the items that fit it; the bar stays while the mouse
 -- is on the slot or the bar, closes when it leaves both, and never opens with Alt (Blizzard's flyout), in combat,
--- or while the player holds an item. Closing a hover bar must not drop the item on the cursor.
+-- or while the player holds an item. Closing a hover bar must not drop the item on the cursor. Runs stock and under
+-- EllesmereUI (skinned bars behave the same).
 local function bar(slotId)
     return _G["GQ_QuickBar_" .. slotId];
 end
@@ -9,7 +10,7 @@ local function barShown(slotId)
     return bar(slotId) ~= nil and bar(slotId):IsVisible();
 end
 
-return function(H, gq)
+local function run(H, gq)
     H.advance(1);
     H.openCharacterFrame();
     H.advance(0.5);
@@ -20,12 +21,33 @@ return function(H, gq)
     H.assertTrue(barShown(1), "hovering the head slot opens its bar");
     local quick = GQ_QuickSlot_1_1;
     H.assertTrue(quick and quick:IsShown() and quick.itemString ~= nil, "bar lists a helmet");
+    -- an ItemButton whose rarity ring shows the helmet's quality (epic)
+    local epic = BAG_ITEM_QUALITY_COLORS[4];
+    local r, g, b = quick.IconBorder:GetVertexColor();
+    H.assertTrue(quick.IconBorder:IsShown() and r == epic.r and g == epic.g and b == epic.b, "epic rarity ring");
+    if H.variantName == "eui" then
+        H.assertTrue(H.countSuiteCalls("ItemButton", quick) >= 1, "button skinned by EllesmereUI");
+        H.assertEq(H.countSuiteCalls("Panel", bar(1).border), 1, "bar background skinned by EllesmereUI");
+    else
+        H.assertEq(#H.suiteCalls, 0, "stock: nothing skinned");
+    end
 
-    -- slot -> bar: stays open
+    -- slot -> bar: stays open; the bar's hover tolerance bridges the gap to the slot (recorded, the mock has no
+    -- hit testing)
+    local slack;
+    local isMouseOver = bar(1).IsMouseOver;
+    bar(1).IsMouseOver = function(self, top, bottom, left, right)
+        slack = {top or 0, bottom or 0, left or 0, right or 0};
+        return isMouseOver(self, top, bottom, left, right);
+    end;
     H.mouseLeave(CharacterHeadSlot);
     H.mouseEnter(quick);
     H.advance(0.3);
     H.assertTrue(barShown(1), "moving onto the bar keeps it open");
+    local _, slot, _, gap = bar(1):GetPoint(1);
+    H.assertTrue(slot == CharacterHeadSlot and slack and -slack[3] >= gap and gap > 0,
+        "hover tolerance covers the gap between slot and bar");
+    bar(1).IsMouseOver = nil;
 
     -- leaving both closes it
     H.mouseLeave(quick);
@@ -94,3 +116,11 @@ return function(H, gq)
     H.closeCharacterFrame();
     H.advance(0.5);
 end
+
+return {
+    run = run,
+    variants = {
+        {name = "stock"},
+        {name = "eui", suites = {EllesmereUI = {charsheetStyle = "eui"}}},
+    },
+};

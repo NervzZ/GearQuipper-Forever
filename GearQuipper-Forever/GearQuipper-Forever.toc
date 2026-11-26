@@ -5,7 +5,7 @@
 ## Version: 55
 ## IconTexture: Interface\Icons\INV_Chest_Plate16
 ## SavedVariables: GQ_DATA, GQ_OPTIONS
-## OptionalDeps: LibStub, LibDataBroker-1.1, CallbackHandler-1.0
+## OptionalDeps: LibStub, LibDataBroker-1.1, CallbackHandler-1.0, EllesmereUI, ElvUI
 
 libs\LibStub\LibStub.lua
 libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
@@ -19,14 +19,13 @@ core\gearquipper-options.lua
 core\gearquipper-data.lua
 core\gearquipper-misc.lua
 core\gearquipper-broker.lua
+core\gearquipper-skin.lua
 
 ui\gearquipper-ui.lua
 ui\gearquipper-ui-frame.lua
 ui\gearquipper-ui-frame.xml
 ui\gearquipper-ui-frame-events.lua
-ui\gearquipper-ui-frame-events.xml
 ui\gearquipper-ui-quickslot.lua
-ui\gearquipper-ui-quickslot.xml
 
 localization\gearquipper-language.lua
 localization\gearquipper-deDE.lua

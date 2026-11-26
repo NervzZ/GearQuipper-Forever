@@ -150,3 +150,30 @@ L["WARNING! Switching will fail if target set does not match the following condi
 L["Weapon swaps in combat are blocked by the game; the switch will happen when combat ends."]           = "Waffenwechsel im Kampf werden vom Spiel blockiert; der Wechsel erfolgt nach dem Kampf.";
 L["Primary"]                                                                                            = "Primär";
 L["Secondary"]                                                                                          = "Sekundär";
+
+-- panel (Forever redesign)
+L["Sets"]                                                                                               = "Sets";
+L["Events"]                                                                                             = "Events";
+L["New set"]                                                                                            = "Neues Set";
+L["Save"]                                                                                               = "Speichern";
+L["Saves the worn gear into the current set."]                                                          = "Speichert die getragene Ausrüstung im aktuellen Set.";
+L["Equip"]                                                                                              = "Anlegen";
+L["Save worn gear into this set"]                                                                       = "Getragene Ausrüstung in diesem Set speichern";
+L["Partial set"]                                                                                        = "Partielles Set";
+L["Equip the set to choose its slots."]                                                                 = "Lege das Set an, um seine Slots zu wählen.";
+L["Put in bank"]                                                                                        = "Einlagern";
+L["Take from bank"]                                                                                     = "Auslagern";
+L["Delete..."]                                                                                          = "Löschen...";
+L["Left-click: equip. Right-click: more."]                                                              = "Linksklick: anlegen. Rechtsklick: mehr.";
+L["partial"]                                                                                            = "partiell";
+L["No sets yet."]                                                                                       = "Noch keine Sets.";
+L["No event bindings yet."]                                                                             = "Noch keine Event-Bindungen.";
+L["Enable event bindings"]                                                                              = "Event-Bindungen aktivieren";
+L["Add binding"]                                                                                        = "Bindung hinzufügen";
+L["Delete binding"]                                                                                     = "Bindung löschen";
+L["New event binding"]                                                                                  = "Neue Event-Bindung";
+L["Event"]                                                                                              = "Event";
+L["Detail"]                                                                                             = "Detail";
+L["Detail 2"]                                                                                           = "Detail 2";
+L["Set"]                                                                                                = "Set";
+L["Add"]                                                                                                = "Hinzufügen";

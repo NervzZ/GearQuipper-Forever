@@ -1,12 +1,13 @@
 -- (n) The slot's tooltip moves out of the way of an open hover bar (bottom-left corner just past the bar's far end,
 -- like Blizzard does for its own flyout), stays there when Blizzard refreshes the tooltip, and is left alone when no
--- GQ bar is open.
+-- GQ bar is open. The bar's background (.border) is a child frame (the stock flyout art or a suite's panel); runs
+-- stock and under EllesmereUI.
 local function anchorOf(tooltip)
     local point, relativeTo, relativePoint = tooltip:GetPoint(1);
     return point, relativeTo, relativePoint;
 end
 
-return function(H, gq)
+local function run(H, gq)
     H.advance(1);
     H.openCharacterFrame();
     H.advance(0.5);
@@ -16,6 +17,7 @@ return function(H, gq)
     H.advance(0.05);
     local bar = GQ_QuickBar_1;
     H.assertTrue(bar and bar:IsVisible(), "head bar open");
+    H.assertTrue(bar.border:IsObjectType("Frame") and bar.border:GetParent() == bar, "background frame of the bar");
     H.assertTrue(GameTooltip:IsShown() and GameTooltip:IsOwned(CharacterHeadSlot), "slot tooltip shown");
     local point, relativeTo, relativePoint = anchorOf(GameTooltip);
     H.assertEq(relativeTo, bar.border, "tooltip anchored to the bar");
@@ -58,3 +60,11 @@ return function(H, gq)
     H.closeCharacterFrame();
     H.advance(0.5);
 end
+
+return {
+    run = run,
+    variants = {
+        {name = "stock"},
+        {name = "eui", suites = {EllesmereUI = {charsheetStyle = "eui"}}},
+    },
+};

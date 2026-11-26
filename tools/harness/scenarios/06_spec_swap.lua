@@ -29,6 +29,22 @@ return {
         bindTalents(H, gq, 1, "Tank");
         bindTalents(H, gq, 2, "DPS");
 
+        -- the panel shows the bindings: a spec badge on each set, a row per binding on the Events tab
+        local panel = H.include("helpers/gq_panel.lua");
+        panel.open();
+        H.assertTrue(panel.setRow("Tank").SpecBadge:IsShown(), "spec badge on Tank");
+        H.assertEq(panel.setRow("Tank").SpecText:GetText(), "1", "Tank: spec 1");
+        H.assertEq(panel.setRow("DPS").SpecText:GetText(), "2", "DPS: spec 2");
+        panel.tab("Events");
+        H.assertEq(#panel.bindingRows(), 2, "a row per binding");
+        H.assertEq(panel.bindingRow(1).Event:GetText(), "On talents change: " .. gq:GetTalentSpecializations()[1]);
+        H.assertEq(panel.bindingRow(1).Info:GetText(), "PvE + PvP");
+        H.assertEq(H.dropdownText(panel.bindingRow(1).SetPicker), "Tank", "spec 1 picker shows Tank");
+        H.assertEq(H.dropdownText(panel.bindingRow(2).SetPicker), "DPS", "spec 2 picker shows DPS");
+        H.assertTrue(GqUiFrame_CbEnableEvents:GetChecked(), "events on");
+        panel.tab("Sets");
+        panel.close();
+
         local tankHelm = gq:LoadSlot(1, "Tank");
         local linkBefore = GetInventoryItemLink("player", 1);
 

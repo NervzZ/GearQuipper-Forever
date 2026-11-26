@@ -289,7 +289,7 @@ function c:HookCharacterStatsFrameScripts()
 end
 
 function c:CreatePaperDollButton()
-    local button = CreateFrame("Button", "GQ_PaperDollButton", c.paperDollFrame);
+    local button = CreateFrame("Button", "GQ_PaperDollButton", c.paperDollFrame, "UIPanelButtonTemplate");
     if GetPaperDollAnchor() ~= c.paperDollFrame then
         -- top right of the paper doll pane, above the right slot column and below the level strip
         button:SetPoint("TOPRIGHT", GetPaperDollAnchor(), "TOPRIGHT", -20, -38);
@@ -301,38 +301,23 @@ function c:CreatePaperDollButton()
     if itemsFrame then
         button:SetFrameLevel(itemsFrame:GetFrameLevel() + 1);
     end
-    button:SetWidth(50);
-    button:SetHeight(20);
+    button:SetSize(50, 20);
     button:SetText("GQ");
-    button:SetNormalFontObject("GameFontNormal");
     button:RegisterForClicks("LeftButtonUp");
     button:SetScript("OnClick", function()
         c:ToggleUI();
     end);
-
-    local ntex = button:CreateTexture();
-    ntex:SetTexture("Interface/Buttons/UI-Panel-Button-Up");
-    ntex:SetTexCoord(0, 0.625, 0, 0.6875);
-    ntex:SetAllPoints();
-    button:SetNormalTexture(ntex);
-
-    local htex = button:CreateTexture();
-    htex:SetTexture("Interface/Buttons/UI-Panel-Button-Highlight");
-    htex:SetTexCoord(0, 0.625, 0, 0.6875);
-    htex:SetAllPoints();
-    button:SetHighlightTexture(htex);
-
-    local ptex = button:CreateTexture();
-    ptex:SetTexture("Interface/Buttons/UI-Panel-Button-Down");
-    ptex:SetTexCoord(0, 0.625, 0, 0.6875);
-    ptex:SetAllPoints();
-    button:SetPushedTexture(ptex);
-
-    local dtex = button:CreateTexture();
-    dtex:SetTexture("Interface/Buttons/UI-Panel-Button-Disabled");
-    dtex:SetTexCoord(0, 0.625, 0, 0.6875);
-    dtex:SetAllPoints();
-    button:SetDisabledTexture(dtex);
+    button:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
+        GameTooltip_SetTitle(GameTooltip, "GearQuipper");
+        GameTooltip_AddNormalLine(GameTooltip,
+            c:GetText("%s: %s", c:GetText("Current set"), c:LoadCurrentSetName() or UNKNOWN));
+        GameTooltip:Show();
+    end);
+    button:SetScript("OnLeave", function()
+        GameTooltip:Hide();
+    end);
+    c:Skin("button", button);
 
     return button;
 end
@@ -361,6 +346,7 @@ function c:CreatePaperDollLabel()
 
     label.text = label:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall");
     label.text:SetPoint("CENTER", 0, 0);
+    c:Skin("font", label.text);
 
     return label;
 end
@@ -384,6 +370,32 @@ function c:SetPaperDollLabelText(setName)
         c.paperDollFrame.paperDollLabel:Show();
     else
         c.paperDollFrame.paperDollLabel:Hide();
+    end
+end
+
+-- GQ's open context menu and its kind ("set" / "broker"). Menu frames are pooled: the menu is forgotten as soon as
+-- it closes, so a later Close never hits another menu that reuses the frame.
+local contextMenu = {menu = nil, kind = nil};
+
+function c:OpenContextMenu(kind, owner, generator)
+    local menu = MenuUtil.CreateContextMenu(owner, generator);
+    if menu then
+        contextMenu.menu, contextMenu.kind = menu, kind;
+        menu:SetClosedCallback(function()
+            if contextMenu.menu == menu then
+                contextMenu.menu, contextMenu.kind = nil, nil;
+            end
+        end);
+    end
+    return menu;
+end
+
+-- Closes GQ's open context menu; with a kind, only a menu of that kind.
+function c:CloseContextMenu(kind)
+    local menu = contextMenu.menu;
+    if menu and (kind == nil or kind == contextMenu.kind) then
+        contextMenu.menu, contextMenu.kind = nil, nil;
+        menu:Close();
     end
 end
 
@@ -516,8 +528,6 @@ function c:ShowRemoveSetDialog(setName)
             OnAccept = function(self, data)
                 if data and tContains(c:LoadSetNames(), data) then
                     c:RemoveSet(data);
-                    GqUiFrame_BtnSaveSet:Hide();
-                    GqUiFrame_BtnRemoveSet:Hide();
                     c:UpdateBroker();
                 end
             end,
@@ -650,6 +660,7 @@ function c:CreateSlotStateBox(slotName, parent)
         c:SetSlotInfo(slotId, "green");
     end);
     checkbutton:Hide();
+    c:Skin("checkbox", checkbutton);
 
     return checkbutton;
 end

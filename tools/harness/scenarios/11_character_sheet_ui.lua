@@ -1,37 +1,24 @@
--- (k) Swapping from the character sheet, the way a player does it: GQ panel, "Add set..." dialog, clicking a set
+-- (k) Swapping from the character sheet, the way a player does it: GQ panel, "New set" dialog, clicking a set
 -- in the list, and the quick-slot bar that opens when an equipped item is picked up.
-local function setEntry(name)
-    for i = 1, 20 do
-        local cb = _G["GqUiSetCheckBox_" .. i];
-        if cb and cb.setName == name and cb:IsShown() then
-            return cb;
-        end
-    end
-end
-
 return function(H, gq)
+    local panel = H.include("helpers/gq_panel.lua");
     H.advance(1);
-    H.openCharacterFrame();
-    H.advance(0.5);
-    if not GqUiFrame:IsShown() then
-        H.assertTrue(GQ_PaperDollButton, "GQ button on the paper doll");
-        GQ_PaperDollButton:Click("LeftButton");
-        H.advance(0.5);
-    end
-    H.assertTrue(GqUiFrame:IsVisible(), "GQ panel open");
+    panel.open();
+    H.assertEq(panel.selectedTab(), "Sets", "the panel opens on the Sets tab");
 
-    -- "Add set..." -> name dialog -> set saved from the worn gear
-    H.assertTrue(GqAddSetButton, "Add set button");
+    -- "New set" -> name dialog -> set saved from the worn gear
+    H.assertTrue(GqAddSetButton and GqAddSetButton:IsEnabled(), "New set button");
     GqAddSetButton:Click("LeftButton");
     H.acceptPopup("Tank");
     H.advance(0.5);
-    H.assertTrue(setEntry("Tank"), "Tank listed");
+    H.assertTrue(panel.setRow("Tank"), "Tank listed");
     -- with the panel open, gear changed by hand is saved into the current set: create DPS, then dress it
     GqAddSetButton:Click("LeftButton");
     H.acceptPopup("DPS");
     H.advance(0.5);
-    H.assertTrue(setEntry("DPS"), "DPS listed");
+    H.assertTrue(panel.setRow("DPS"), "DPS listed");
     H.assertEq(gq:LoadCurrentSetName(), "DPS");
+    H.assertTrue(panel.setRow("DPS").Tick:IsShown(), "the new set is ticked");
     H.wearSetBPieces();
     H.advance(0.5);
     H.assertChat("<DPS> Saved slot 1", "hand-equipped helmet auto-saved into DPS");
@@ -40,11 +27,12 @@ return function(H, gq)
         C_Container.GetContainerItemLink(H.find("headA")[1].bag, H.find("headA")[1].slot)), "Tank untouched");
 
     -- click a set in the list
-    setEntry("Tank"):Click("LeftButton");
+    panel.setRow("Tank"):Click("LeftButton");
     H.advance(3);
     H.assertWearing(H.SET_A, "clicked Tank");
-    H.assertTrue(setEntry("Tank"):GetChecked(), "Tank checked in the list");
-    setEntry("DPS"):Click("LeftButton");
+    H.assertTrue(panel.setRow("Tank").Tick:IsShown(), "Tank ticked in the list");
+    H.assertFalse(panel.setRow("DPS").Tick:IsShown(), "DPS no longer ticked");
+    panel.setRow("DPS"):Click("LeftButton");
     H.advance(3);
     H.assertWearing(H.SET_B, "clicked DPS");
 
@@ -60,6 +48,5 @@ return function(H, gq)
     H.advance(1);
     H.assertEquipped(1, "headA", "quick slot equipped the helmet");
     H.assertCursorEmpty();
-    H.closeCharacterFrame();
-    H.advance(0.5);
+    panel.close();
 end

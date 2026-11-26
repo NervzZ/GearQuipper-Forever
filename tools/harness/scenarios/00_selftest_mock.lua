@@ -1,4 +1,331 @@
--- Self-test of the mock (no addon): cursor/equip semantics, events, links, combat, secrets, timers, XML, bank.
+-- Self-test of the mock (no addon): cursor/equip semantics, events, links, combat, secrets, timers, XML, bank,
+-- and the modern UI pieces: template registry, panel/tab/button/checkbox templates, intrinsic ItemButton,
+-- ScrollBox + DataProvider + MinimalScrollBar, dropdowns and menus, UI-suite stubs.
+
+-- Runs fn and returns the Lua errors it recorded (then clears them): for checks that must fail.
+local function errorsOf(H, fn)
+    local before = #H.errors;
+    fn();
+    local list = {};
+    for i = before + 1, #H.errors do
+        list[#list + 1] = H.errors[i].msg;
+    end
+    for i = #H.errors, before + 1, -1 do
+        table.remove(H.errors, i);
+    end
+    return list;
+end
+
+local function selfTestTemplates(H)
+    -- unknown templates, fonts and an intrinsic template on the wrong frame type fail the run
+    local errs = errorsOf(H, function()
+        CreateFrame("Frame", nil, UIParent, "NoSuchTemplateAnywhere");
+    end);
+    H.assertTrue(errs[1] and errs[1]:find("unknown template 'NoSuchTemplateAnywhere'"), "unknown template is an error");
+    errs = errorsOf(H, function()
+        UIParent:CreateFontString(nil, "OVERLAY", "GameFontNormalTypo");
+        UIParent:CreateFontString(nil, "OVERLAY", "GameFontNormalLeft");
+    end);
+    H.assertEq(#errs, 1, "unknown font is an error, a Forever font is not");
+    errs = errorsOf(H, function()
+        CreateFrame("Button", nil, UIParent, "WowStyle1DropdownTemplate");
+    end);
+    H.assertTrue(errs[1] and errs[1]:find("DropdownButton template"), "dropdown template needs a DropdownButton");
+    errs = errorsOf(H, function()
+        CreateFrame("Frame", nil, UIParent, "MinimalScrollBar");
+    end);
+    H.assertTrue(errs[1] and errs[1]:find("EventFrame template"), "MinimalScrollBar needs an EventFrame");
+    H.assertEq(C_XMLUtil.GetTemplateInfo("SharedButtonSmallTemplate").height, 28);
+    H.assertEq(C_XMLUtil.GetTemplateInfo("WowStyle1DropdownTemplate").type, "DropdownButton");
+    H.assertEq(C_XMLUtil.GetTemplateInfo("NoSuchTemplateAnywhere"), nil);
+
+    -- DefaultPanelTemplate: Bg, TopTileStreaks, NineSlice pieces, TitleContainer.TitleText ($parentTitleText)
+    local panel = CreateFrame("Frame", "SelfTestPanel", UIParent, "DefaultPanelTemplate");
+    H.assertTrue(panel.Bg == SelfTestPanelBg and panel.Bg:GetTexture() == "Interface\\FrameGeneral\\UI-Background-Rock");
+    H.assertEq(panel.TopTileStreaks:GetAtlas(), "_UI-Frame-TopTileStreaks");
+    H.assertEq(panel.NineSlice.TopLeftCorner:GetAtlas(), "UI-Frame-Metal-CornerTopLeft");
+    H.assertEq(panel.NineSlice:GetFrameLevel(), 500);
+    H.assertTrue(panel.TitleContainer.TitleText == SelfTestPanelTitleText, "title text named like the client");
+    panel:SetTitle("Hello");
+    H.assertEq(panel:GetTitleText():GetText(), "Hello");
+    H.assertFalse(panel.FrameGlow:IsShown());
+    local inset = CreateFrame("Frame", nil, panel, "InsetFrameTemplate");
+    H.assertEq(inset.Bg:GetTexture(), "Interface\\FrameGeneral\\UI-Background-Marble");
+    H.assertEq(inset.NineSlice.TopLeftCorner:GetAtlas(), "UI-Frame-InnerTopLeft");
+    local close = CreateFrame("Button", nil, panel, "UIPanelCloseButtonDefaultAnchors");
+    H.assertEq(close:GetWidth(), 28, "Camelot close button size");
+    local point, _, _, x, y = close:GetPoint(1);
+    H.assertTrue(point == "TOPRIGHT" and x == 0 and y == 3, "Camelot close button anchor");
+    H.assertEq(close:GetNormalTexture():GetAtlas(), "RedButton-Exit");
+    close:Click();
+    H.assertFalse(panel:IsShown(), "close button hides its parent");
+    panel:Show();
+
+    -- tabs: join the parent's Tabs array; PanelTemplates select / deselect them
+    local tabs = {};
+    for i = 1, 3 do
+        tabs[i] = CreateFrame("Button", nil, panel, "PanelTopTabButtonTemplate");
+        tabs[i]:SetID(i);
+        tabs[i]:SetText("Tab" .. i);
+    end
+    H.assertTrue(panel.Tabs and #panel.Tabs == 3 and panel.Tabs[2] == tabs[2], "parentArray Tabs");
+    H.assertTrue(tabs[1].isTopTab, "top tab");
+    PanelTemplates_SetNumTabs(panel, 3);
+    PanelTemplates_SetTab(panel, 2);
+    H.assertEq(PanelTemplates_GetSelectedTab(panel), 2);
+    H.assertTrue(tabs[2].LeftActive:IsShown() and not tabs[2].Left:IsShown() and not tabs[2]:IsEnabled(), "selected");
+    H.assertTrue(tabs[1].Left:IsShown() and not tabs[1].LeftActive:IsShown() and tabs[1]:IsEnabled(), "deselected");
+    local p2, rel2 = tabs[2]:GetPoint(1);
+    H.assertTrue(p2 == "TOPLEFT" and rel2 == tabs[1], "tabs anchored in a row");
+
+    -- buttons and check buttons
+    local shared = CreateFrame("Button", nil, panel, "SharedButtonSmallTemplate");
+    H.assertEq(shared:GetWidth(), 138);
+    H.assertEq(shared:GetHighlightTexture():GetAtlas(), "128-RedButton-Highlight");
+    panel:Hide();
+    panel:Show();
+    H.assertEq(shared.Left:GetAtlas(), "128-RedButton-Left", "state art drawn on show");
+    shared:Disable();
+    H.assertEq(shared.Center:GetAtlas(), "_128-RedButton-Center-Disabled");
+    local gold = CreateFrame("Button", "SelfTestGold", panel, "UIPanelButtonTemplate");
+    gold:SetText("Go");
+    H.assertTrue(gold.Text == SelfTestGoldText and gold:GetText() == "Go", "ButtonText");
+    gold:Disable();
+    H.assertEq(gold.Left:GetTexture(), "Interface\\Buttons\\UI-DialogBox-goldbutton-disabled-left");
+    local cb = CreateFrame("CheckButton", "SelfTestCheck", panel, "UICheckButtonTemplate");
+    H.assertTrue(cb.Text == cb.text and cb.Text == SelfTestCheckText, "Text + text alias");
+    H.assertEq(cb:GetCheckedTexture():GetTexture(), "Interface\\Buttons\\UI-CheckBox-Check");
+    cb:Click();
+    H.assertTrue(cb:GetChecked());
+
+    -- intrinsic ItemButton (also the character slots) + SetItemButton* globals
+    local ib = CreateFrame("ItemButton", "SelfTestItem", panel);
+    H.assertTrue(ib.icon == SelfTestItemIconTexture and ib.Count == SelfTestItemCount, "icon / Count names");
+    H.assertTrue(CharacterHeadSlot.IconBorder ~= nil, "character slots are item buttons");
+    H.assertEq(ib:GetNormalTexture():GetTexture(), "Interface\\Buttons\\UI-Quickslot2");
+    SetItemButtonTexture(ib, 133070);
+    H.assertEq(ib.icon:GetTexture(), 133070);
+    SetItemButtonCount(ib, 5);
+    H.assertTrue(ib.Count:IsShown() and ib.Count:GetText() == "5");
+    SetItemButtonQuality(ib, 3);
+    local r, g, b = ib.IconBorder:GetVertexColor();
+    H.assertTrue(ib.IconBorder:IsShown() and b > 0.8 and r < 0.1, "rare border");
+    SetItemButtonQuality(ib, 0);
+    H.assertFalse(ib.IconBorder:IsShown(), "poor items have no border");
+    ib:SetAlpha(0.35);
+    H.assertTrue(ib.icon:GetAlpha() == 0.35 and ib:GetAlpha() == 1, "ItemButtonMixin:SetAlpha fades the parts");
+
+    -- the same templates from addon XML (intrinsic element tags, parentKey / parentArray on instances)
+    local function node(tag, attr, kids)
+        return {tag = tag, attr = attr or {}, kids = kids or {}, file = "selftest.xml", line = 1};
+    end
+    local xmlFrame = H.xml.loadTop(node("Frame", {name = "SelfTestXmlPanel", inherits = "DefaultPanelTemplate"}, {
+        node("Frames", {}, {
+            node("Button", {parentKey = "CloseButton", inherits = "UIPanelCloseButtonDefaultAnchors"}),
+            node("Frame", {parentKey = "ScrollBox", inherits = "WowScrollBoxList"}),
+            node("EventFrame", {parentKey = "ScrollBar", inherits = "MinimalScrollBar"}),
+            node("DropdownButton", {parentKey = "Dropdown", inherits = "WowStyle1DropdownTemplate"}),
+            node("Button", {parentArray = "Tabs", inherits = "PanelTopTabButtonTemplate", id = "1", text = "Sets"}),
+            node("ItemButton", {parentKey = "Slot"})})}));
+    H.assertTrue(xmlFrame.CloseButton and xmlFrame.ScrollBox.ScrollTarget and xmlFrame.ScrollBar.Track.Thumb,
+        "XML children from templates");
+    H.assertTrue(xmlFrame.Dropdown.SetupMenu and xmlFrame.Slot.IconBorder, "intrinsic element tags");
+    H.assertTrue(#xmlFrame.Tabs == 1 and xmlFrame.Tabs[1]:GetText() == "Sets" and xmlFrame.Tabs[1]:GetID() == 1,
+        "tab added once to Tabs");
+
+    -- size changes reach OnSizeChanged; EventFrames send their OnShow callback
+    local sized, ev = 0, CreateFrame("EventFrame", nil, panel);
+    ev:SetScript("OnSizeChanged", function()
+        sized = sized + 1;
+    end);
+    ev:SetSize(10, 10);
+    ev:SetSize(10, 10);
+    H.assertEq(sized, 1, "OnSizeChanged once per change");
+    local shown = 0;
+    ev:RegisterCallback("OnShow", function()
+        shown = shown + 1;
+    end, panel);
+    ev:Hide();
+    ev:Show();
+    H.assertEq(shown, 1, "EventFrame OnShow callback");
+end
+
+local function selfTestScrollBox(H)
+    local holder = CreateFrame("Frame", nil, UIParent);
+    local box = CreateFrame("Frame", nil, holder, "WowScrollBoxList");
+    box:SetSize(100, 64);
+    local bar = CreateFrame("EventFrame", nil, holder, "MinimalScrollBar");
+    H.assertTrue(bar.Back and bar.Forward and bar.Track.Thumb, "MinimalScrollBar parts");
+    local view = CreateScrollBoxListLinearView(2, 2, 0, 0, 4);
+    local inits, resets = {}, 0;
+    view:SetElementInitializer("UICheckButtonTemplate", function(frame, data)
+        inits[#inits + 1] = data.name;
+        frame.Text:SetText(data.name);
+    end);
+    view:SetElementResetter(function()
+        resets = resets + 1;
+    end);
+    ScrollUtil.InitScrollBoxListWithScrollBar(box, bar, view);
+    local behavior = ScrollUtil.AddManagedScrollBarVisibilityBehavior(box, bar);
+    local acquired = 0;
+    ScrollUtil.AddAcquiredFrameCallback(box, function(o, frame, data, new)
+        acquired = acquired + 1;
+    end, holder);
+    local dp = CreateDataProvider({{name = "a"}, {name = "b"}});
+    box:SetDataProvider(dp);
+    local frames = H.scrollBoxFrames(box);
+    H.assertEq(#frames, 2);
+    H.assertEq(table.concat(inits, ","), "a,b", "initializer in data order");
+    H.assertTrue(frames[1]:GetParent() == box.ScrollTarget, "rows live on the scroll target");
+    H.assertEq(frames[2]:GetHeight(), 32, "extent from the template size");
+    local _, rel, _, _, y = frames[2]:GetPoint(1);
+    H.assertTrue(rel == box.ScrollTarget and y == -36, "row 2 below row 1 (32 + spacing 4)");
+    H.assertTrue(box:FindFrame(dp:Find(2)) == frames[2] and frames[2]:GetElementData().name == "b");
+    H.assertEq(box:GetExtent(), 2 + 32 + 4 + 32 + 2, "extent with padding and spacing");
+    H.assertTrue(bar:IsShown() and box:HasScrollableExtent(), "72 > 64: scrollable, bar shown");
+    -- row 2 ends at 2 + 32 + 4 + 32 = 70; aligned to the end of the 64 visible: offset 6 of the 8 scroll range
+    box:ScrollToElementDataIndex(2, ScrollBoxConstants.AlignEnd);
+    H.assertTrue(math.abs(box:GetScrollPercentage() - 0.75) < 0.001, "scrolled row 2 into view");
+    H.assertTrue(math.abs(bar:GetScrollPercentage() - 0.75) < 0.001, "the bar follows the box");
+    H.scrollStep(bar, "Back");
+    H.assertEq(box:GetScrollPercentage(), 0, "the Back stepper scrolls the box up");
+
+    -- recycling: reassigning re-inits the same frames; contents changes keep kept rows without re-init
+    inits = {};
+    box:SetDataProvider(CreateDataProvider({{name = "c"}, {name = "d"}}));
+    local again = H.scrollBoxFrames(box);
+    H.assertTrue(again[1] == frames[1] and again[2] == frames[2], "frames recycled");
+    H.assertEq(table.concat(inits, ","), "c,d");
+    H.assertEq(resets, 2, "element resetter on release");
+    local dp2 = box:GetDataProvider();
+    inits = {};
+    dp2:InsertAtIndex({name = "e"}, 1);
+    H.assertEq(table.concat(inits, ","), "e", "only the new element initialized");
+    H.assertEq(H.scrollBoxFrames(box)[1]:GetElementData().name, "e", "frames follow data order");
+    dp2:RemoveIndex(1);
+    H.assertEq(#H.scrollBoxFrames(box), 2);
+    dp2:Flush();
+    H.assertEq(#H.scrollBoxFrames(box), 0, "flush releases every row");
+    H.assertFalse(bar:IsShown(), "nothing to scroll: bar hidden");
+    H.assertTrue(acquired >= 5, "acquired-frame callbacks");
+    dp2:SetSortComparator(function(l, r)
+        return l.name < r.name;
+    end);
+    dp2:Insert({name = "z"}, {name = "y"});
+    H.assertEq(dp2:Find(1).name, "y", "sorted provider");
+    H.assertEq(H.scrollBoxFrames(box)[1]:GetElementData().name, "y");
+    H.mouseWheel(box, -1);
+
+    -- selection behavior
+    local selection = ScrollUtil.AddSelectionBehavior(box);
+    local changed = {};
+    selection:RegisterCallback(SelectionBehaviorMixin.Event.OnSelectionChanged, function(o, data, selected)
+        changed[#changed + 1] = data.name .. (selected and "+" or "-");
+    end, holder);
+    selection:SelectElementData(dp2:Find(1));
+    selection:SelectElementData(dp2:Find(2));
+    -- as in game, the element that loses the selection is reported twice
+    H.assertEq(table.concat(changed, ","), "y+,y-,y-,z+", "single selection moves");
+    H.assertTrue(selection:IsSelected(H.scrollBoxFrameFor(box, function(d) return d.name == "z" end)));
+end
+
+local function selfTestMenus(H)
+    local holder = CreateFrame("Frame", nil, UIParent);
+    local dd = CreateFrame("DropdownButton", nil, holder, "WowStyle1DropdownTemplate");
+    H.assertTrue(dd.Background and dd.Arrow and dd.Text, "WowStyle1 parts");
+    H.assertEq(dd:GetWidth(), 120);
+    local value, flags, clicked = "b", {x = false}, nil;
+    dd:SetDefaultText("pick one");
+    dd:SetupMenu(function(owner, root)
+        root:CreateTitle("Letters");
+        for _, v in ipairs({"a", "b", "c"}) do
+            root:CreateRadio(v:upper(), function(d) return value == d; end, function(d) value = d; end, v);
+        end
+        root:CreateDivider();
+        root:CreateCheckbox("Flag", function() return flags.x; end, function() flags.x = not flags.x; end);
+        local sub = root:CreateButton("More");
+        sub:CreateButton("Deep", function() clicked = "deep"; end);
+        root:CreateButton("Off", function() end):SetEnabled(false);
+    end);
+    H.assertEq(H.dropdownText(dd), "B", "shows the selected radio");
+    local entries = H.dropdownEntries(dd);
+    H.assertEq(entries[1].text, "Letters");
+    H.assertTrue(entries[3].selected and entries[3].radio, "B selected");
+    H.assertEq(H.pickDropdown(dd, "C"), nil, "radio: menu closes");
+    H.assertEq(value, "c");
+    H.assertEq(H.dropdownText(dd), "C", "text follows the pick");
+    H.assertFalse(dd:IsMenuOpen());
+    H.assertEq(H.pickDropdown(dd, "Flag"), MenuResponse.Refresh, "checkbox: menu stays open");
+    H.assertTrue(flags.x and dd:IsMenuOpen());
+    H.assertEq(H.dropdownText(dd), "C, Flag", "every selection is listed");
+    H.closeMenus();
+    H.assertFalse(dd:IsMenuOpen(), "closed");
+    H.pickDropdown(dd, "More", "Deep");
+    H.assertEq(clicked, "deep", "submenu path");
+    H.assertFalse(pcall(H.pickDropdown, dd, "Off"), "a disabled entry cannot be picked");
+    H.closeMenus();
+    H.assertFalse(pcall(H.pickDropdown, dd, "Nope"), "unknown entry");
+    H.closeMenus();
+    value, flags.x = nil, false;
+    dd:GenerateMenu();
+    H.assertEq(H.dropdownText(dd), "pick one", "default text without a selection");
+    dd:OverrideText("fixed");
+    H.pickDropdown(dd, "A");
+    H.assertEq(H.dropdownText(dd), "fixed", "OverrideText wins");
+    dd:SetEnabled(false);
+    H.assertEq(dd.Arrow:GetAtlas(), "common-dropdown-a-button-disabled");
+    H.assertFalse(pcall(H.openDropdown, dd), "a disabled dropdown does not open");
+    dd:SetEnabled(true);
+    H.mouseWheel(dd, -1);
+
+    -- MenuUtil context menus and the legacy UIDropDownMenu through H.clickMenuEntry
+    local got;
+    MenuUtil.CreateContextMenu(holder, function(owner, root)
+        root:CreateButton("Push", function(data) got = data; end, 42);
+    end);
+    H.assertEq(H.menuEntries()[1].text, "Push");
+    H.clickMenuEntry("Push");
+    H.assertEq(got, 42);
+    H.assertEq(H.menuEntries(), nil, "context menu closed");
+    local legacy = CreateFrame("Frame", "SelfTestLegacyDD", UIParent, "UIDropDownMenuTemplate");
+    UIDropDownMenu_Initialize(legacy, function()
+        local info = UIDropDownMenu_CreateInfo();
+        info.text, info.func = "Old", function() got = "old"; end;
+        UIDropDownMenu_AddButton(info);
+    end);
+    H.clickMenuEntry("Old");
+    H.assertEq(got, "old", "legacy dropdown entry");
+end
+
+local function selfTestSuites(H)
+    H.installSuites({EllesmereUI = {}, ElvUI = {}});
+    local S, elvS;
+    EllesmereUI.RegisterSkin("SelfTest", function(s) S = s; end);
+    local E = unpack(ElvUI);
+    E:GetModule("Skins"):AddCallbackForAddon("SelfTestAddon", "SelfTest", function(s) elvS = s; end, nil, nil, nil,
+        "character");
+    H.loadedAddons.SelfTestAddon = true;
+    H.fire("PLAYER_LOGIN");
+    H.assertTrue(S and S.apiVersion == 4, "EllesmereUI callback at login");
+    H.assertTrue(elvS == E:GetModule("Skins"), "ElvUI callback at login");
+    local f = CreateFrame("Frame", nil, UIParent, "DefaultPanelTemplate");
+    local direct = f:CreateTexture();
+    S.Shell(f, {noBorder = true});
+    H.assertEq(f.Bg:GetAlpha(), 0, "Shell fades the panel art");
+    local later = f:CreateTexture();
+    H.euiRestrip();
+    H.assertEq(later:GetAlpha(), 0, "Restrip fades textures added later");
+    elvS:HandleButton(f);
+    H.assertEq(table.concat(H.suiteCallsFor(f), ","), "Shell,HandleButton");
+    H.suiteFail("Panel", true);
+    H.assertFalse(pcall(S.Panel, f), "injected failure");
+    H.suiteFail("Panel", false);
+    local late;
+    EllesmereUI.RegisterSkin("Late", function(s) late = s; end);
+    H.assertTrue(late ~= nil, "a registration after login fires at once");
+    H.assertTrue(direct ~= nil);
+end
+
 return {
     noAddon = true,
     latency = 0, -- the latency section below switches it on by itself
@@ -168,6 +495,11 @@ return {
 
         H.assertTotalItems(total, "no item lost or duplicated");
         H.assertCursorEmpty();
+
+        selfTestTemplates(H);
+        selfTestScrollBox(H);
+        selfTestMenus(H);
+        selfTestSuites(H);
         H.log("self-test reached the end; uiErrors:", #H.uiErrors, "events:", #H.eventLog);
     end,
 };

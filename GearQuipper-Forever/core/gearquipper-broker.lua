@@ -75,8 +75,9 @@ function c:InitBroker()
             end,
             OnClick = function(self, button)
                 if button == "RightButton" then
-                    CloseDropDownMenus();
-                    ToggleDropDownMenu(1, nil, LDB.dropDownMenu, self, -4, -4);
+                    c:OpenContextMenu("broker", self, function(owner, root)
+                        c:PopulateBrokerMenu(root);
+                    end);
                 end
             end,
             OnDoubleClick = function(self, button)
@@ -93,59 +94,32 @@ function c:InitBroker()
             return;
         end
 
-        LDB.dropDownMenu = CreateFrame("Frame", "GearQuipper_Broker_DropDownMenu", UIParent,
-            BackdropTemplateMixin and "BackdropTemplate");
-        -- LDB.dropDownMenu:SetBackdropColor(0, 0, 0);
-        LDB.dropDownMenu:SetBackdrop({
-            bgFile = "Interface/Tooltips/UI-Tooltip-Background",
-            edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 16,
-            insets = {
-                left = 4,
-                right = 4,
-                top = 4,
-                bottom = 4
-            }
-        });
-        UIDropDownMenu_Initialize(LDB.dropDownMenu, function(frame, level, menuList)
-            local currentSet = c:LoadCurrentSetName();
-            local info = UIDropDownMenu_CreateInfo();
-
-            if c:IsSwitching() then
-                info.text = c:GetText("- Currently Switching -");
-                info.isTitle = true;
-                info.notCheckable = true;
-                UIDropDownMenu_AddButton(info);
-            else
-                info.text = c:GetText("Switch to set:");
-                info.isTitle = true;
-                info.notCheckable = true;
-                UIDropDownMenu_AddButton(info);
-                info.isTitle = false;
-                info.notClickable = false;
-
-                for index, setName in ipairs(c:LoadSetNames(false)) do
-                    local info = UIDropDownMenu_CreateInfo();
-                    info.checked = (setName == currentSet);
-                    info.func = function()
-                        if setName ~= currentSet then
-                            c:QueueSwitch({
-                                [c.SWITCHARG_SETNAME] = setName
-                            });
-                        end
-                    end
-                    info.text = setName;
-                    UIDropDownMenu_AddButton(info);
-                end
-            end
-            LDB.dropDownMenu:SetAllPoints();
-        end);
-        LDB.dropDownMenu:Hide();
-
         c:UpdateBroker();
         c:Println(c:GetText("Data broker initialized."));
+    end
+end
+
+-- right-click menu of the data broker: the sets, the current one ticked
+function c:PopulateBrokerMenu(root)
+    if c:IsSwitching() then
+        root:CreateTitle(c:GetText("- Currently Switching -"));
+        return;
+    end
+
+    root:CreateTitle(c:GetText("Switch to set:"));
+    local currentSet = c:LoadCurrentSetName();
+    local function isSelected(setName)
+        return setName == currentSet;
+    end
+    local function setSelected(setName)
+        if setName ~= currentSet then
+            c:QueueSwitch({
+                [c.SWITCHARG_SETNAME] = setName
+            });
+        end
+    end
+    for _, setName in ipairs(c:LoadSetNames(false)) do
+        root:CreateRadio(setName, isSelected, setSelected, setName);
     end
 end
 

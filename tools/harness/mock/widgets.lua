@@ -35,7 +35,8 @@ local DOCUMENTED_METHODS = H.api.widgetMethods;
 
 local FRAME_TYPES = set({"Frame", "Button", "CheckButton", "EditBox", "ScrollFrame", "Slider", "StatusBar",
     "GameTooltip", "Cooldown", "Model", "PlayerModel", "DressUpModel", "ModelScene", "MessageFrame",
-    "ScrollingMessageFrame", "SimpleHTML", "ColorSelect", "Minimap", "ItemButton", "DropdownButton"});
+    "ScrollingMessageFrame", "SimpleHTML", "ColorSelect", "Minimap", "ItemButton", "DropdownButton", "EventFrame",
+    "EventButton"});
 H.FRAME_TYPES = FRAME_TYPES;
 
 ---------------------------------------------------------------------------
@@ -188,7 +189,9 @@ end
 ---------------------------------------------------------------------------
 -- scripts
 ---------------------------------------------------------------------------
--- Runs a script handler and its hooks, each in its own error trap (like the client).
+-- Runs a script handler and its hooks, each in its own error trap (like the client). Intrinsic frame types
+-- (ItemButton, DropdownButton, EventFrame...) carry their own handlers that SetScript cannot replace: "precall"
+-- ones run before the frame's handler, "postcall" ones after it.
 function H.fireScript(obj, scriptName, ...)
     local p = P[obj];
     if not p then
@@ -198,9 +201,16 @@ function H.fireScript(obj, scriptName, ...)
     if scriptName == "OnEvent" then
         where = where .. " " .. tostring((...));
     end
+    local intrinsic = p.intrinsicScripts and p.intrinsicScripts[scriptName];
+    if intrinsic and intrinsic.order ~= "postcall" then
+        H.trap(where .. " (intrinsic)", intrinsic.fn, obj, ...);
+    end
     local fn = p.scripts[scriptName];
     if fn then
         H.trap(where, fn, obj, ...);
+    end
+    if intrinsic and intrinsic.order == "postcall" then
+        H.trap(where .. " (intrinsic)", intrinsic.fn, obj, ...);
     end
     local hooks = p.hooks[scriptName];
     if hooks then
@@ -208,6 +218,13 @@ function H.fireScript(obj, scriptName, ...)
             H.trap(where .. " (hook)", hook, obj, ...);
         end
     end
+end
+
+-- Sets an intrinsic handler (see H.fireScript); order "precall" (default) or "postcall".
+function H.setIntrinsicScript(obj, scriptName, fn, order)
+    local p = P[obj];
+    p.intrinsicScripts = p.intrinsicScripts or {};
+    p.intrinsicScripts[scriptName] = {fn = fn, order = order or "precall"};
 end
 
 -- The mouse enters / leaves a frame: IsMouseOver follows, OnEnter / OnLeave fire (motion = true).
@@ -397,6 +414,13 @@ local function regionCommon()
             if type(point) ~= "string" then
                 error(describe(self) .. ":SetPoint(): Usage: SetPoint(point [, relativeTo [, relativePoint]] [, x, y])", 2);
             end
+            if type(relativeTo) == "number" then
+                -- SetPoint(point, x, y): relative to the parent
+                relativeTo, relativePoint, x, y = nil, nil, relativeTo, relativePoint;
+            elseif type(relativePoint) == "number" then
+                -- SetPoint(point, relativeTo, x, y)
+                relativePoint, x, y = nil, relativePoint, x;
+            end
             if type(relativeTo) == "string" then
                 relativeTo = _G[relativeTo];
             end
@@ -424,20 +448,36 @@ local function regionCommon()
         SetAllPoints = function(self, relativeTo)
             P[self].points = {{"TOPLEFT", relativeTo}, {"BOTTOMRIGHT", relativeTo}};
         end,
+        -- frames get OnSizeChanged when their size changes (the client sends it at layout time)
         SetSize = function(self, w, h)
-            P[self].width, P[self].height = w or 0, h or w or 0;
+            local p = P[self];
+            local ow, oh = p.width, p.height;
+            p.width, p.height = w or 0, h or w or 0;
+            if not p.region and (ow ~= p.width or oh ~= p.height) then
+                H.fireScript(self, "OnSizeChanged", p.width, p.height);
+            end
         end,
         GetSize = function(self)
             return P[self].width, P[self].height;
         end,
         SetWidth = function(self, w)
-            P[self].width = w;
+            local p = P[self];
+            local old = p.width;
+            p.width = w;
+            if not p.region and old ~= w then
+                H.fireScript(self, "OnSizeChanged", p.width, p.height);
+            end
         end,
         GetWidth = function(self)
             return P[self].width;
         end,
         SetHeight = function(self, h)
-            P[self].height = h;
+            local p = P[self];
+            local old = p.height;
+            p.height = h;
+            if not p.region and old ~= h then
+                H.fireScript(self, "OnSizeChanged", p.width, p.height);
+            end
         end,
         GetHeight = function(self)
             return P[self].height;
@@ -492,23 +532,47 @@ end
 
 class("Region", nil, regionCommon());
 
+-- A texture shows one of: a file (SetTexture), an atlas (SetAtlas) or a colour (SetColorTexture); setting one
+-- clears the others, so scenarios can assert which art a region shows.
 class("Texture", "Region", {
     SetTexture = function(self, tex)
-        P[self].texture = tex;
+        local p = P[self];
+        p.texture, p.atlas, p.color = tex, nil, nil;
         return true;
     end,
     GetTexture = function(self)
         return P[self].texture;
     end,
-    SetAtlas = function(self, atlas)
-        P[self].atlas = atlas;
+    SetAtlas = function(self, atlas, useAtlasSize)
+        local p = P[self];
+        p.atlas, p.texture, p.color = atlas, nil, nil;
+        p.useAtlasSize = useAtlasSize and true or false;
         return true;
     end,
     GetAtlas = function(self)
         return P[self].atlas;
     end,
     SetColorTexture = function(self, r, g, b, a)
-        P[self].color = {r, g, b, a};
+        local p = P[self];
+        p.color, p.texture, p.atlas = {r, g, b, a}, nil, nil;
+    end,
+    GetColorTexture = function(self)
+        local c = P[self].color;
+        if c then
+            return c[1], c[2], c[3], c[4] or 1;
+        end
+    end,
+    SetTexCoord = function(self, ...)
+        P[self].texCoord = {...};
+    end,
+    GetTexCoord = function(self)
+        return unpack(P[self].texCoord or {0, 1, 0, 1});
+    end,
+    SetBlendMode = function(self, mode)
+        P[self].blendMode = mode;
+    end,
+    GetBlendMode = function(self)
+        return P[self].blendMode or "BLEND";
     end,
     SetVertexColor = function(self, r, g, b, a)
         P[self].vertexColor = {r, g, b, a};
@@ -638,11 +702,11 @@ local frameMethods = {
         end
         return true, unpack(units);
     end,
-    CreateTexture = function(self, name, layer, template)
+    CreateTexture = function(self, name, layer, template, subLevel)
         local tex = H.newObject("Texture", H.resolveName(name, self), self, true);
-        P[tex].layer = layer;
+        P[tex].layer, P[tex].subLevel = layer, subLevel;
         if template then
-            H.applyTemplates(tex, template);
+            H.applyRegionTemplates(tex, template);
         end
         return tex;
     end,
@@ -655,8 +719,8 @@ local frameMethods = {
     CreateFontString = function(self, name, layer, template)
         local fs = H.newObject("FontString", H.resolveName(name, self), self, true);
         P[fs].layer = layer;
-        if template and H.xmlTemplates[template] then
-            H.applyTemplates(fs, template);
+        if template then
+            H.applyRegionTemplates(fs, template);
         end
         return fs;
     end,
@@ -727,7 +791,7 @@ local function textureSetter(field)
             P[self][field] = tex;
         else
             local t = P[self][field] or H.newObject("Texture", nil, self, true);
-            P[t].texture = tex;
+            t:SetTexture(tex);
             P[self][field] = t;
         end
     end, function(self)
@@ -802,6 +866,16 @@ local buttonMethods = {
         P[self].disabledTexture = nil;
     end,
 };
+local function atlasSetter(field)
+    return function(self, atlas)
+        local t = P[self][field] or H.newObject("Texture", nil, self, true);
+        t:SetAtlas(atlas);
+        P[self][field] = t;
+    end
+end
+buttonMethods.SetNormalAtlas, buttonMethods.SetPushedAtlas = atlasSetter("normalTexture"), atlasSetter("pushedTexture");
+buttonMethods.SetHighlightAtlas, buttonMethods.SetDisabledAtlas = atlasSetter("highlightTexture"),
+    atlasSetter("disabledTexture");
 buttonMethods.SetNormalTexture, buttonMethods.GetNormalTexture = textureSetter("normalTexture");
 buttonMethods.SetPushedTexture, buttonMethods.GetPushedTexture = textureSetter("pushedTexture");
 buttonMethods.SetHighlightTexture, buttonMethods.GetHighlightTexture = textureSetter("highlightTexture");
@@ -809,6 +883,7 @@ buttonMethods.SetDisabledTexture, buttonMethods.GetDisabledTexture = textureSett
 class("Button", "Frame", buttonMethods);
 class("ItemButton", "Button", {});
 class("DropdownButton", "Button", {});
+class("EventButton", "Button", {});
 
 local checkMethods = {
     SetChecked = function(self, v)
@@ -948,7 +1023,7 @@ class("ScrollFrame", "Frame", {
     end,
 });
 
-for _, t in ipairs({"Cooldown", "Model", "ModelScene", "SimpleHTML", "ColorSelect", "Minimap"}) do
+for _, t in ipairs({"Cooldown", "Model", "ModelScene", "SimpleHTML", "ColorSelect", "Minimap", "EventFrame"}) do
     class(t, "Frame", {});
 end
 class("PlayerModel", "Model", {});
@@ -1042,20 +1117,119 @@ end);
 ---------------------------------------------------------------------------
 -- CreateFrame and templates
 ---------------------------------------------------------------------------
-H.xmlTemplates = {};    -- virtual templates defined by the addon's XML
-H.blizzTemplates = {};  -- Blizzard templates (Lua builders, see blizzui.lua)
+H.xmlTemplates = {};      -- virtual templates defined by the addon's XML
+H.blizzTemplates = {};    -- Blizzard templates (Lua builders, see blizzui.lua and templates.lua)
+H.blizzTemplateInfo = {}; -- template -> {type = root frame type, width, height} (C_XMLUtil.GetTemplateInfo)
+H.intrinsics = {};        -- intrinsic frame type -> builder (ItemButton, DropdownButton, EventFrame, EventButton)
+H.fontNames = {};         -- font objects that exist on Forever (mock/fonts.lua)
+for _, fontName in ipairs(H.include("mock/fonts.lua")) do
+    H.fontNames[fontName] = true;
+end
 
+-- Templates whose root is an intrinsic type only work on a frame of that type (they rely on its mixin).
+local INTRINSIC_ROOTS = {ItemButton = true, DropdownButton = true, EventFrame = true};
+
+-- Registers a Blizzard template: builder(obj) creates its regions/children, named and keyed like the real XML.
+function H.defineTemplate(name, frameType, width, height, builder)
+    H.blizzTemplates[name] = builder;
+    H.blizzTemplateInfo[name] = {type = frameType, width = width or 0, height = height or 0};
+end
+
+local function sizeOf(node)
+    for _, kid in ipairs(node.kids or {}) do
+        if kid.tag == "Size" then
+            local x, y = tonumber(kid.attr.x), tonumber(kid.attr.y);
+            for _, d in ipairs(kid.kids or {}) do
+                if d.tag == "AbsDimension" then
+                    x, y = tonumber(d.attr.x) or x, tonumber(d.attr.y) or y;
+                end
+            end
+            return x or 0, y or 0;
+        end
+    end
+end
+
+-- C_XMLUtil.GetTemplateInfo: root type and size of an addon or Blizzard template (size inherited when the template
+-- sets none); nil for an unknown name.
+function H.templateInfo(name)
+    local xml = H.xmlTemplates[name];
+    if xml then
+        local info = {type = xml.tag, width = 0, height = 0};
+        local node, guard = xml, 0;
+        while node and guard < 20 do
+            guard = guard + 1;
+            local w, h = sizeOf(node);
+            if w then
+                info.width, info.height = w, h;
+                break;
+            end
+            local parentName = node.attr.inherits and node.attr.inherits:match("[^,%s]+");
+            node = parentName and H.xmlTemplates[parentName];
+            if parentName and not node and H.blizzTemplateInfo[parentName] then
+                info.width, info.height = H.blizzTemplateInfo[parentName].width, H.blizzTemplateInfo[parentName].height;
+            end
+        end
+        return info;
+    end
+    local b = H.blizzTemplateInfo[name];
+    if b then
+        return {type = b.type, width = b.width, height = b.height};
+    end
+end
+
+-- Unknown templates are a recorded Lua error (the scenario fails): a typo must not pass silently.
 function H.applyTemplates(obj, templates)
     for template in tostring(templates):gmatch("[^,%s]+") do
         local xml = H.xmlTemplates[template];
         local blizz = H.blizzTemplates[template];
         if xml then
+            if INTRINSIC_ROOTS[xml.tag] and not isA(obj, xml.tag) then
+                H.recordError("CreateFrame", {msg = string.format(
+                    "template '%s' is a %s template but %s is a %s (create it with frame type %s)", template,
+                    xml.tag, describe(obj), P[obj].type, xml.tag), trace = H.traceback("", 3)});
+            end
             H.applyXmlTemplate(obj, xml);
         elseif blizz then
+            local info = H.blizzTemplateInfo[template];
+            if info and INTRINSIC_ROOTS[info.type] and not isA(obj, info.type) then
+                H.recordError("CreateFrame", {msg = string.format(
+                    "template '%s' is a %s template but %s is a %s (create it with frame type %s)", template,
+                    info.type, describe(obj), P[obj].type, info.type), trace = H.traceback("", 3)});
+            end
             blizz(obj);
         else
-            H.warn("unknown template '" .. template .. "' (not defined by the addon and not mocked; may not exist on Forever)");
+            H.recordError("CreateFrame", {msg = "unknown template '" .. template ..
+                "' (not defined by the addon and not mocked; check the name on the forever branch)",
+                trace = H.traceback("", 3)});
         end
+    end
+end
+
+-- Templates of a FontString (an addon template or a font object) or a Texture (an addon template; Blizzard
+-- texture templates are not modelled and only warn).
+function H.applyRegionTemplates(region, templates)
+    for template in tostring(templates):gmatch("[^,%s]+") do
+        local font = rawget(_G, template);
+        if H.xmlTemplates[template] then
+            H.applyXmlTemplate(region, H.xmlTemplates[template]);
+        elseif P[region].type == "FontString" then
+            if H.fontNames[template] or (type(font) == "table" and P[font] and P[font].type == "Font") then
+                P[region].fontObject = font or template;
+            else
+                H.recordError("CreateFontString", {msg = "unknown font object '" .. template ..
+                    "' (not a Forever font and not defined by the addon)", trace = H.traceback("", 3)});
+            end
+        else
+            H.warn("texture template '" .. template .. "' is not modelled (check the name on the forever branch)");
+        end
+    end
+end
+
+-- Builds the intrinsic structure of frameType (if it has one) right after the object is created.
+function H.applyIntrinsic(obj, frameType)
+    local builder = H.intrinsics[frameType];
+    if builder then
+        builder(obj);
     end
 end
 
@@ -1070,12 +1244,19 @@ function CreateFrame(frameType, name, parent, template, id)
     if id then
         P[frame].id = id;
     end
+    H.applyIntrinsic(frame, frameType);
     if template then
         H.applyTemplates(frame, template);
-        H.fireScript(frame, "OnLoad");
     end
+    H.fireScript(frame, "OnLoad");
     return frame;
 end
+
+C_XMLUtil = {
+    GetTemplateInfo = function(name)
+        return H.templateInfo(name);
+    end,
+};
 
 function H.state(obj)
     return P[obj];

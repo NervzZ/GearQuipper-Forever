@@ -3,8 +3,33 @@ gearquipper = gearquipper or {};
 local c = gearquipper;
 
 local quickBars;
-local defaultSlotSize, defaultSlotMargin = 38, 8;
-local defaultSlotSize_Ammo, defaultSlotMargin_Ammo = 26, 10;
+
+-- Geometry of Blizzard's equipment flyout (Blizzard_FrameXML/Camelot/EquipmentFlyout.lua, forever branch: EFITEM_*,
+-- EQUIPMENTFLYOUT_BORDERWIDTH): 37 px item buttons, 4 px apart in a row, rows 42 px apart, 3 px border.
+local BUTTON_SIZE, BUTTON_SPACING, ROW_SPACING, BAR_PADDING = 37, 4, 5, 3;
+local BAR_GAP = 4; -- between the paper-doll slot and its bar
+local MOUSE_SLACK = BAR_GAP + 4; -- the bar stays open while the mouse crosses the gap
+local AMMO_SCALE = 26 / 37; -- the ammo bar keeps its smaller (26 px) buttons
+
+-- Stock look: the flyout background, cut like EquipmentFlyout_Show does. Pieces are {left, right, top, bottom, width,
+-- height}; the first one sits 5 px left of and 4 px above the bar.
+local FLYOUT_TEXTURE = "Interface\\PaperDollInfoFrame\\UI-GearManager-Flyout";
+local FLYOUT_OFFSET_X, FLYOUT_OFFSET_Y = -5, 4;
+local FLYOUT_ONESLOT = {{0, 0.09765625, 0.5546875, 0.77734375, 25, 54},
+    {0.41796875, 0.51171875, 0.5546875, 0.77734375, 24, 54}};
+local FLYOUT_ROW_LEFT = {0, 0.16796875, 0.5546875, 0.77734375, 43, 54};
+local FLYOUT_ROW_CENTER = {0.16796875, 0.328125, 0.5546875, 0.77734375, 41, 54};
+local FLYOUT_ROW_RIGHT = {0.328125, 0.51171875, 0.5546875, 0.77734375, 47, 54};
+-- Blizzard stacks rows of five (214 px wide multirow pieces); GQ's one-button columns take the left and the right
+-- 25 px of each row piece, as the one-slot piece does with the one-row strip.
+local FLYOUT_COLUMN_TOP = {{0, 0.09765625, 0, 0.19140625, 25, 49}, {0.73828125, 0.8359375, 0, 0.19140625, 25, 49}};
+local FLYOUT_COLUMN_MIDDLE = {{0, 0.09765625, 0.19140625, 0.35546875, 25, 42},
+    {0.73828125, 0.8359375, 0.19140625, 0.35546875, 25, 42}};
+local FLYOUT_COLUMN_BOTTOM = {{0, 0.09765625, 0.35546875, 0.546875, 25, 49},
+    {0.73828125, 0.8359375, 0.35546875, 0.546875, 25, 49}};
+-- the glow Blizzard's flyout puts on the paper-doll slot it belongs to
+local SLOT_GLOW_TEXTURE = "Interface\\PaperDollInfoFrame\\UI-GearManager-ItemButton-Highlight";
+local SLOT_GLOW_SIZE, SLOT_GLOW_COORD = 50, 0.78125;
 
 -- Slots the game lets you change in combat (Blizzard's INVSLOTS_EQUIPABLE_IN_COMBAT: main hand, off hand, ranged).
 local combatSlots = INVSLOTS_EQUIPABLE_IN_COMBAT or {
@@ -16,13 +41,6 @@ local combatSlots = INVSLOTS_EQUIPABLE_IN_COMBAT or {
 local queuedEquips = {}; -- [slotId] = {itemString, link}: quick-slot clicks waiting for the end of combat
 local lastCombatEquip; -- last in-combat quick-slot equip, re-queued if the game blocks it (ADDON_ACTION_BLOCKED)
 
-local function GetSlotDimensions(slotId)
-    if slotId == INVSLOT_AMMO then
-        return defaultSlotSize_Ammo, defaultSlotMargin_Ammo;
-    end
-    return defaultSlotSize, defaultSlotMargin;
-end
-
 -- Blizzard's own equipment flyout on the Forever paper doll (Alt + hover, or the Equipment Manager's arrow buttons).
 local function IsBlizzardFlyoutShown()
     return EquipmentFlyoutFrame and EquipmentFlyoutFrame:IsShown();
@@ -30,7 +48,7 @@ end
 
 -- Mouse on the paper-doll slot, the bar (with a little slack for the gap between them) or one of its buttons.
 local function IsMouseOverBar(bar)
-    if bar.parent:IsMouseOver() or bar:IsMouseOver(4, -4, -4, 4) then
+    if bar.parent:IsMouseOver() or bar:IsMouseOver(MOUSE_SLACK, -MOUSE_SLACK, -MOUSE_SLACK, MOUSE_SLACK) then
         return true;
     end
     for _, quickSlot in pairs(bar.slots or {}) do
@@ -205,7 +223,6 @@ function c:CreateQuickBar(slotId)
         return;
     end
     local frame = CreateFrame("Frame", "GQ_QuickBar_" .. slotId, parent);
-    local slotSize, slotMargin = GetSlotDimensions(slotId);
 
     frame:SetFrameStrata("HIGH");
     frame:SetScript("OnHide", function(self)
@@ -231,39 +248,121 @@ function c:CreateQuickBar(slotId)
 
     frame.parent = parent;
     frame.slotId = slotId;
+    frame.vertical = c:IsWeaponSlot(slotId);
 
-    frame.border = frame:CreateTexture("GQ_QuickBarBorderTex", "BORDER");
-    frame.border:SetTexture("Interface\\PaperDoll\\UI-Backpack-EmptySlot.blp");
-    frame.border:SetPoint("TOPLEFT");
+    -- The background is a child frame: skins restyle (and later re-strip) the frames handed to them, and this one
+    -- only ever holds the flyout pieces. Under a skin it becomes an opaque panel over EllesmereUI's slot texts.
+    frame.border = CreateFrame("Frame", nil, frame);
+    frame.border:SetAllPoints(frame);
+    frame.border:SetFrameLevel(frame:GetFrameLevel());
+    frame.flyoutPieces = {};
+    c:Skin("panel", frame.border);
 
-    if c:IsWeaponSlot(slotId) then
-        frame:SetWidth(slotSize + slotMargin);
-        frame:SetPoint("TOPLEFT", parent, "TOPLEFT", -(slotMargin / 3 * 2), -slotSize);
-        frame.border:SetWidth(slotSize + slotMargin);
+    frame.slotGlowFrame = CreateFrame("Frame", nil, frame);
+    frame.slotGlowFrame:SetAllPoints(parent);
+    frame.slotGlow = frame.slotGlowFrame:CreateTexture(nil, "OVERLAY");
+    frame.slotGlow:SetTexture(SLOT_GLOW_TEXTURE);
+    frame.slotGlow:SetTexCoord(0, SLOT_GLOW_COORD, 0, SLOT_GLOW_COORD);
+    frame.slotGlow:SetSize(SLOT_GLOW_SIZE, SLOT_GLOW_SIZE);
+    frame.slotGlow:SetPoint("CENTER");
+
+    -- weapon slots (and ammo) open downward, the others to the right; the buttons line up with the slot's edge
+    if frame.vertical then
+        frame:SetPoint("TOPLEFT", parent, "BOTTOMLEFT", -BAR_PADDING, -BAR_GAP);
     else
-        frame:SetHeight(slotSize + slotMargin);
-        frame:SetPoint("TOPLEFT", parent, "TOPLEFT", slotSize, slotMargin / 2);
-        frame.border:SetHeight(slotSize + slotMargin);
+        frame:SetPoint("TOPLEFT", parent, "TOPRIGHT", BAR_GAP, BAR_PADDING);
+    end
+    if slotId == INVSLOT_AMMO then
+        frame:SetScale(AMMO_SCALE);
     end
 
     return frame;
 end
 
+local function FlyoutRows(count, vertical)
+    if count == 1 then
+        return {FLYOUT_ONESLOT};
+    end
+    local rows, row = {}, {};
+    if vertical then
+        rows[1] = FLYOUT_COLUMN_TOP;
+        for i = 2, count - 1 do
+            rows[i] = FLYOUT_COLUMN_MIDDLE;
+        end
+        rows[count] = FLYOUT_COLUMN_BOTTOM;
+        return rows;
+    end
+    row[1] = FLYOUT_ROW_LEFT;
+    for i = 2, count - 1 do
+        row[i] = FLYOUT_ROW_CENTER;
+    end
+    row[count] = FLYOUT_ROW_RIGHT;
+    return {row};
+end
+
+-- Stock look only: a skin backend draws its own panel on .border, so the flyout pieces and the slot glow stay
+-- hidden (checked on every show, as a skin can switch on after the bar was built).
+local function LayoutFlyoutBackground(quickBar, count)
+    local skinned = c:GetSkinBackend() ~= nil;
+    local pieces, used = quickBar.flyoutPieces, 0;
+    if not skinned then
+        local rowStart;
+        for _, row in ipairs(FlyoutRows(count, quickBar.vertical)) do
+            local previous;
+            for _, piece in ipairs(row) do
+                used = used + 1;
+                local texture = pieces[used];
+                if not texture then
+                    texture = quickBar.border:CreateTexture(nil, "BACKGROUND");
+                    texture:SetTexture(FLYOUT_TEXTURE);
+                    pieces[used] = texture;
+                end
+                texture:ClearAllPoints();
+                texture:SetTexCoord(piece[1], piece[2], piece[3], piece[4]);
+                texture:SetSize(piece[5], piece[6]);
+                if previous then
+                    texture:SetPoint("TOPLEFT", previous, "TOPRIGHT");
+                elseif rowStart then
+                    texture:SetPoint("TOPLEFT", rowStart, "BOTTOMLEFT");
+                else
+                    texture:SetPoint("TOPLEFT", quickBar.border, "TOPLEFT", FLYOUT_OFFSET_X, FLYOUT_OFFSET_Y);
+                end
+                texture:Show();
+                rowStart = previous and rowStart or texture;
+                previous = texture;
+            end
+        end
+    end
+    for i = used + 1, #pieces do
+        pieces[i]:Hide();
+    end
+    quickBar.slotGlowFrame:SetShown(not skinned);
+end
+
+local function LayoutQuickBar(quickBar, count)
+    local columns, rows = count, 1;
+    if quickBar.vertical then
+        columns, rows = 1, count;
+    end
+    quickBar:SetSize(BAR_PADDING * 2 + columns * BUTTON_SIZE + (columns - 1) * BUTTON_SPACING,
+        BAR_PADDING * 2 + rows * BUTTON_SIZE + (rows - 1) * ROW_SPACING);
+    LayoutFlyoutBackground(quickBar, count);
+end
+
+-- Quick slots are the intrinsic ItemButton (not secure: they equip from Lua and must hide in combat).
 function c:CreateQuickSlot(slotId, index)
-    local frame = CreateFrame("Button", "GQ_QuickSlot_" .. slotId .. "_" .. index, quickBars[slotId],
-        "GqQuickSlotTemplate");
-    local slotSize, slotMargin = GetSlotDimensions(slotId);
+    local quickBar = quickBars[slotId];
+    local frame = CreateFrame("ItemButton", "GQ_QuickSlot_" .. slotId .. "_" .. index, quickBar);
+    -- no quick-slot frame art: the bar's background holds the buttons, the rarity ring (IconBorder) marks them
+    frame:ClearNormalTexture();
+    frame:ClearPushedTexture();
 
-    frame:SetWidth(slotSize);
-    frame:SetHeight(slotSize);
-    frame:SetFrameStrata("HIGH");
-
-    if c:IsWeaponSlot(slotId) then
-        frame:SetPoint("TOPLEFT", quickBars[slotId], "TOPLEFT", slotMargin / 2,
-            -(slotSize * (index - 1)) - (slotMargin * (index - 1)) - slotMargin);
+    if quickBar.vertical then
+        frame:SetPoint("TOPLEFT", quickBar, "TOPLEFT", BAR_PADDING,
+            -BAR_PADDING - (index - 1) * (BUTTON_SIZE + ROW_SPACING));
     else
-        frame:SetPoint("TOPLEFT", quickBars[slotId], "TOPLEFT",
-            (slotSize * (index - 1)) + (slotMargin * (index - 1)) + slotMargin, -(slotMargin / 2));
+        frame:SetPoint("TOPLEFT", quickBar, "TOPLEFT", BAR_PADDING + (index - 1) * (BUTTON_SIZE + BUTTON_SPACING),
+            -BAR_PADDING);
     end
 
     frame:SetScript("OnEnter", function(self)
@@ -333,21 +432,11 @@ function c:AddQuickSlot(slotId, slotIndex, itemEntry)
     quickSlot.link = link;
     quickSlot.itemString = itemString;
     quickSlot.bagId, quickSlot.bagSlotId, quickSlot.equippedSlotId = bagId, bagSlotId, equippedSlotId;
-    quickSlot.icon:SetTexture(texture);
-    if count and count > 1 then
-        quickSlot.count:SetText(count);
-        quickSlot.count:Show();
-    else
-        quickSlot.count:Hide();
-    end
-
-    if quality and quality > 1 then
-        local r, g, b = c:GetItemQualityColor(quality);
-        quickSlot.glow:SetVertexColor(r, g, b);
-        quickSlot.glow:Show();
-    else
-        quickSlot.glow:Hide();
-    end
+    SetItemButtonTexture(quickSlot, texture);
+    SetItemButtonCount(quickSlot, count);
+    SetItemButtonQuality(quickSlot, quality, link);
+    -- after the quality: a skin re-reads the rarity border from it
+    c:Skin("itembutton", quickSlot);
 
     quickSlot:Show();
 end
@@ -383,8 +472,6 @@ local function ShowQuickBar(slotId, hover)
 
     local index = #entries;
     if index > 0 then
-        local slotSize, slotMargin = GetSlotDimensions(slotId);
-
         quickBars = quickBars or {};
         quickBars[slotId] = quickBars[slotId] or c:CreateQuickBar(slotId);
         if not quickBars[slotId] then
@@ -397,13 +484,7 @@ local function ShowQuickBar(slotId, hover)
             c:AddQuickSlot(slotId, slotIndex, itemEntry);
         end
 
-        if c:IsWeaponSlot(slotId) then
-            quickBars[slotId].border:SetHeight((slotSize * index) + (slotMargin * (index - 1)) + (slotMargin * 2));
-            quickBars[slotId]:SetHeight((slotSize * index) + (slotMargin * (index - 1)));
-        else
-            quickBars[slotId].border:SetWidth((slotSize * index) + (slotMargin * (index - 1)) + (slotMargin * 2));
-            quickBars[slotId]:SetWidth((slotSize * index) + (slotMargin * (index - 1)));
-        end
+        LayoutQuickBar(quickBars[slotId], index);
         quickBars[slotId].hoverOpened = hover and true or nil;
         quickBars[slotId].hoverElapsed = 0;
         quickBars[slotId]:Show();

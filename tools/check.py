@@ -10,6 +10,11 @@ Checks:
   4. Cross-reference: every `c:Name(` / `gearquipper:Name(` call has a `function c:Name` definition.
   5. Banned APIs: legacy globals that do not exist on WoW Forever, the restricted combat log, flavor checks.
   6. Secret-sensitive APIs: unit-state reads that must go through c:ReadState / c:SafeCall.
+  7. Legacy UI: GQ's own widgets use modern templates and go through the skin adapter (c:Skin), so GQ's files
+     (not libs/) may not use UIDropDownMenuTemplate / UIDropDownMenu_* / ToggleDropDownMenu,
+     ChatConfigCheckButtonTemplate or BasicFrameTemplateWithInset; the UI files (ui/, the options canvas
+     core/gearquipper-options.lua and the broker menu core/gearquipper-broker.lua) may not call SetBackdrop or
+     SetFont with a font file (font objects only). The options canvas complies; exemptions are listed in UI_EXEMPT.
 """
 import os
 import re
@@ -165,6 +170,51 @@ for f, src in code.items():
         for name in ("OptionsButtonTemplate", "OptionsSliderTemplate", "OptionsBoxTemplate"):
             if name in line:
                 err(f"{f}:{n}: template {name} does not exist on the modern client")
+
+# ---------------------------------------------------------------- legacy UI
+LEGACY_TEMPLATES = {
+    "UIDropDownMenuTemplate": "use WowStyle1DropdownTemplate + SetupMenu",
+    "ChatConfigCheckButtonTemplate": "use UICheckButtonTemplate",
+    "BasicFrameTemplateWithInset": "use DefaultPanelTemplate + InsetFrameTemplate",
+}
+LEGACY_UI_CALLS = r"(?<![\w.:])(UIDropDownMenu_\w+|ToggleDropDownMenu)\s*\("
+UI_FILES = ("ui/", "core/gearquipper-options.lua", "core/gearquipper-broker.lua")
+UI_SETBACKDROP = r":SetBackdrop\s*\("
+UI_SETFONT_FILE = r":SetFont\s*\(\s*(\"|'|\[\[|STANDARD_TEXT_FONT|UNIT_NAME_FONT|DAMAGE_TEXT_FONT|NAMEPLATE_FONT)"
+UI_XML_BACKDROP = r"key\s*=\s*\"backdropInfo\""
+# (file, text on the line, reason): deliberate exceptions to the UI rules
+UI_EXEMPT = [
+    ("ui/gearquipper-ui.lua", "c.watermark.fontString:SetFont",
+     "GQ_Watermark: the 7 px monochrome 'GQ' on the micro button stays as it is (owner decision)"),
+]
+
+
+def ui_exempt(f, line):
+    return any(f == ef and text in line for ef, text, _ in UI_EXEMPT)
+
+
+for f, src in code.items():
+    is_ui = f.startswith(UI_FILES)
+    for n, line in enumerate(src.splitlines(), 1):
+        for name, use in LEGACY_TEMPLATES.items():
+            if name in line:
+                err(f"{f}:{n}: legacy template {name} ({use}): {line.strip()[:120]}")
+        m = re.search(LEGACY_UI_CALLS, line)
+        if m:
+            err(f"{f}:{n}: legacy UIDropDownMenu API {m.group(1)} (use MenuUtil / SetupMenu): {line.strip()[:120]}")
+        if is_ui and not ui_exempt(f, line):
+            if re.search(UI_SETBACKDROP, line):
+                err(f"{f}:{n}: SetBackdrop in GQ's UI (use InsetFrameTemplate / c:Skin): {line.strip()[:120]}")
+            if re.search(UI_SETFONT_FILE, line):
+                err(f"{f}:{n}: SetFont with a font file in GQ's UI (use a font object / c:Skin('font')): "
+                    f"{line.strip()[:120]}")
+for f, src in xml_sources.items():
+    for n, line in enumerate(src.splitlines(), 1):
+        for name, use in LEGACY_TEMPLATES.items():
+            if name in line:
+                err(f"{f}:{n}: legacy template {name} ({use})")
+        if f.startswith(UI_FILES) and re.search(UI_XML_BACKDROP, line):
+            err(f"{f}:{n}: backdrop KeyValues in GQ's UI (use InsetFrameTemplate / c:Skin)")
 
 # ---------------------------------------------------------------- secret-sensitive reads
 SECRET_APIS = r"(?<![\w.:])(UnitIsAFK|UnitIsDND|UnitIsPVP|IsMounted|UnitOnTaxi|IsStealthed|IsSwimming|IsSubmerged|IsInGroup|IsInRaid|UnitIsDeadOrGhost|UnitCastingInfo|UnitChannelInfo|UnitCreatureType|UnitAffectingCombat|GetShapeshiftForm)\b"

@@ -1266,9 +1266,7 @@ function c:FinishSwitch(switchArgs, watch)
             c:RefreshSetList(setName);
         end
 
-        if CloseDropDownMenus then
-            CloseDropDownMenus();
-        end
+        c:CloseContextMenu();
         PlaySound(1264);
 
         c:SetSwitching();

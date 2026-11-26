@@ -22,7 +22,12 @@ A scenario file returns either `function(H, gq)` or a table
       relogSetup = function(H) ... end,   -- optional: setup of the second session
       latency = 0.2,                      -- optional, overrides --latency
       noAddon = true,                     -- optional: test the mock only
-      noDefaultCharacter = true }         -- optional: start with empty bags and no gear
+      noDefaultCharacter = true,          -- optional: start with empty bags and no gear
+      suites = {EllesmereUI = {...}},     -- optional: UI-suite stubs installed before `setup` (tools/harness/mock/suites.lua)
+      variants = {{name = "...", ...}} }  -- optional: run the scenario once per variant, each in a fresh session;
+                                          --   a variant may set setup/run/suites/latency/noDefaultCharacter/
+                                          --   savedVariables (missing fields fall back to the top level);
+                                          --   H.variantName tells the running variant (no relog with variants)
 Every script handler, timer callback and hook runs in an error trap (like BugGrabber); any recorded Lua error,
 failed assertion or scenario error makes the scenario FAIL. Exit code 1 when any scenario fails.
 """
@@ -152,8 +157,11 @@ def annotate(msg):
 class Session:
     """One client session (fresh Lua state): mock, character, addon, login events, one scenario phase."""
 
-    def __init__(self, scenario, phase, saved_source):
+    def __init__(self, scenario, phase, saved_source, variant=None):
         self.scn, self.phase, self.saved_source = scenario, phase, saved_source
+        self.variant = variant  # 1-based index into spec.variants, or None
+        self.variant_count = 0
+        self.label = ""
         self.lua = lua51.LuaRuntime(unpack_returned_tuples=True)
         self.H = None
         self.has_relog = False
@@ -250,9 +258,29 @@ class Session:
             return False, "scenario chunk failed: " + spec["msg"], spec["trace"]
         if lua.eval("type")(spec) == "function":
             spec = lua.table_from({"run": spec})
+        variants = spec["variants"]
+        if variants is not None:
+            self.variant_count = lua.eval("function(t) return #t end")(variants)
+            if self.variant_count == 0:
+                return False, "scenario has an empty `variants` list", ""
+            if spec["relog"] is not None:
+                return False, "a scenario cannot combine `variants` and `relog`", ""
+            self.variant = self.variant or 1
+            v = variants[self.variant]
+            merged = lua.table()
+            for key in ("setup", "run", "suites", "latency", "noDefaultCharacter", "savedVariables", "noAddon"):
+                merged[key] = v[key] if v[key] is not None else spec[key]
+            name = v["name"] or ("variant %d" % self.variant)
+            self.label = "[%s] " % name
+            H.variantName = name
+            spec = merged
         self.has_relog = spec["relog"] is not None
         H.latency = spec["latency"] if spec["latency"] is not None else self.scn.args.latency
 
+        if spec["suites"] is not None:
+            ok, e = H.runProtected(H.installSuites, spec["suites"])
+            if not ok:
+                return False, "suite stubs failed: " + e["msg"], e["trace"]
         if not spec["noDefaultCharacter"]:
             H.setupDefaultCharacter()
         else:
@@ -312,12 +340,22 @@ class Scenario:
         first = Session(self, 1, None)
         self.sessions.append(first)
         ok, msg, trace = first.run()
+        if msg and first.label:
+            msg = first.label + msg
         if ok and first.has_relog:
             second = Session(self, 2, first.saved_out)
+            second.label = "[relog session] "
             self.sessions.append(second)
             ok, msg, trace = second.run()
             if msg:
                 msg = "[relog session] " + msg
+        # variants: every one runs (a failing variant does not hide the others); the first failure is reported
+        for index in range(2, first.variant_count + 1):
+            session = Session(self, 1, None, variant=index)
+            self.sessions.append(session)
+            v_ok, v_msg, v_trace = session.run()
+            if not v_ok and ok:
+                ok, msg, trace = False, session.label + (v_msg or ""), v_trace
         return ok, msg, trace
 
 
@@ -331,10 +369,9 @@ def short_trace(trace, verbose):
 
 def report(scn, ok, msg, trace, elapsed, verbose):
     errors = []
-    for i, session in enumerate(scn.sessions):
+    for session in scn.sessions:
         if session.H is not None:
-            prefix = "[relog session] " if i > 0 else ""
-            errors += [(prefix, e) for e in session.H.errors.values()]
+            errors += [(session.label, e) for e in session.H.errors.values()]
     passed = ok and not errors
     print("%s %s (%.2fs)" % ("PASS" if passed else "FAIL", scn.name, elapsed))
     if msg:

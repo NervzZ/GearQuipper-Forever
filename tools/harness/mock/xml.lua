@@ -118,11 +118,7 @@ local function buildRegion(owner, rnode, layer)
     P[region].layer = layer;
     setKeys(region, owner, rnode.attr);
     if rnode.attr.inherits then
-        for t in rnode.attr.inherits:gmatch("[^,%s]+") do
-            if H.xmlTemplates[t] then
-                H.applyXmlTemplate(region, H.xmlTemplates[t]);
-            end -- otherwise a font object / Blizzard texture template: nothing to build
-        end
+        H.applyRegionTemplates(region, rnode.attr.inherits);
     end
     applyBody(region, rnode);
     H.fireScript(region, "OnLoad");
@@ -145,6 +141,7 @@ function H.xml.buildFrame(node, parent)
     end
     local obj = H.newObject(node.tag, H.resolveName(a.name, parent), parent);
     setKeys(obj, parent, a);
+    H.applyIntrinsic(obj, node.tag);
     if a.inherits then
         H.applyTemplates(obj, a.inherits);
     end

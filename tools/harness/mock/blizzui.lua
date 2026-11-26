@@ -1,6 +1,7 @@
 -- blizzui.lua: what Blizzard's FrameXML provides on Forever: constants and global strings, colours, fonts,
--- templates (Lua builders), the character sheet frames, GameTooltip + TooltipDataProcessor, StaticPopup,
--- Settings, UIDropDownMenu/MenuUtil, chat frames and slash commands.
+-- legacy templates (Lua builders; the modern ones are in templates.lua, scroll.lua and menu.lua), the character
+-- sheet frames, GameTooltip + TooltipDataProcessor, StaticPopup, Settings, the legacy UIDropDownMenu, chat frames
+-- and slash commands.
 local H = ...;
 local P = H.widgetState;
 
@@ -25,7 +26,7 @@ local STRINGS = {
     ALWAYS = "Always", NEVER = "Never", YES = "Yes", NO = "No", EMPTY = "Empty", DEFAULT = "Default",
     APPLY = "Apply", CANCEL = "Cancel", SAVE = "Save", OKAY = "Okay", ACCEPT = "Accept", CLOSE = "Close",
     DELETE = "Delete", NONE = "None", NONE_KEY = "None", UNKNOWN = "Unknown", UNKNOWNOBJECT = "Unknown",
-    ENABLE = "Enable",
+    ENABLE = "Enable", FILTER = "Filter",
     DISABLE = "Disable", ADD = "Add", REMOVE = "Remove", RESET = "Reset", OPTIONS = "Options",
     TALENT_SPEC_PRIMARY = "Primary", TALENT_SPEC_SECONDARY = "Secondary", DUAL_SPEC_PRIMARY = "Primary",
     DUAL_SPEC_SECONDARY = "Secondary", ITEM_UNIQUE_EQUIPPABLE = "Unique-Equipped", ITEM_UNIQUE = "Unique",
@@ -74,6 +75,24 @@ NORMAL_FONT_COLOR, HIGHLIGHT_FONT_COLOR = CreateColor(1, 0.82, 0), CreateColor(1
 GRAY_FONT_COLOR, RED_FONT_COLOR, GREEN_FONT_COLOR = CreateColor(0.5, 0.5, 0.5), CreateColor(1, 0.1, 0.1),
     CreateColor(0.1, 1, 0.1);
 DISABLED_FONT_COLOR = CreateColor(0.5, 0.5, 0.5);
+WHITE_FONT_COLOR, YELLOW_FONT_COLOR = CreateColor(1, 1, 1), CreateColor(1, 1, 0);
+-- Blizzard_Colors (Mainline): bag/item-button border colours; Poor has none, so its border stays hidden
+COMMON_GRAY_COLOR, UNCOMMON_GREEN_COLOR = CreateColor(0.65882, 0.65882, 0.65882), CreateColor(0.11765, 1, 0);
+RARE_BLUE_COLOR, EPIC_PURPLE_COLOR = CreateColor(0, 0.43922, 0.86667), CreateColor(0.63922, 0.20784, 0.93333);
+LEGENDARY_ORANGE_COLOR, ARTIFACT_GOLD_COLOR = CreateColor(1, 0.50196, 0), CreateColor(0.90196, 0.8, 0.50196);
+HEIRLOOM_BLUE_COLOR = CreateColor(0, 0.8, 1);
+BAG_ITEM_QUALITY_COLORS = {[1] = COMMON_GRAY_COLOR, [2] = UNCOMMON_GREEN_COLOR, [3] = RARE_BLUE_COLOR,
+    [4] = EPIC_PURPLE_COLOR, [5] = LEGENDARY_ORANGE_COLOR, [6] = ARTIFACT_GOLD_COLOR, [7] = HEIRLOOM_BLUE_COLOR,
+    [8] = HEIRLOOM_BLUE_COLOR};
+ColorManager = {
+    GetColorDataForBagItemQuality = function(quality)
+        return BAG_ITEM_QUALITY_COLORS[quality];
+    end,
+    GetDefaultColorDataForBagItemQuality = function(quality)
+        return BAG_ITEM_QUALITY_COLORS[quality];
+    end,
+};
+LIST_DELIMITER = ", ";
 TOOLTIP_DEFAULT_COLOR, TOOLTIP_DEFAULT_BACKGROUND_COLOR = CreateColor(1, 1, 1), CreateColor(0.09, 0.09, 0.19);
 ITEM_QUALITY_COLORS = {};
 for q = 0, 7 do
@@ -112,11 +131,8 @@ end
 function CreateFont(name)
     return H.newFont(name);
 end
-for _, name in ipairs({"GameFontNormal", "GameFontNormalSmall", "GameFontNormalLarge", "GameFontNormalMed3",
-    "GameFontHighlight", "GameFontHighlightSmall", "GameFontHighlightLarge", "GameFontDisable", "GameFontDisableSmall",
-    "GameFontRed", "GameFontGreen", "GameFontWhite", "GameFontBlack", "NumberFontNormal", "NumberFontNormalSmall",
-    "ChatFontNormal", "GameTooltipText", "GameTooltipTextSmall", "GameTooltipHeaderText", "SystemFont_Small",
-    "SystemFont_Med1"}) do
+-- every font object of the Forever client (mock/fonts.lua)
+for name in pairs(H.fontNames) do
     H.newFont(name);
 end
 
@@ -175,33 +191,11 @@ T.BackdropTemplate = function(f)
 end
 T.TooltipBackdropTemplate = T.BackdropTemplate;
 
+-- legacy check button (UICheckButtonTemplate, the panel/close buttons and the modern templates: templates.lua)
 local function checkButton(f)
     P[f].fontString = fs(f, "Text", "Text");
 end
-T.UICheckButtonTemplate, T.ChatConfigCheckButtonTemplate, T.ChatConfigBaseCheckButtonTemplate = checkButton,
-    checkButton, function() end;
-T.UICheckButtonArtTemplate, T.MinimalCheckboxTemplate, T.MinimalCheckboxArtTemplate = function() end, function() end,
-    function() end;
-
-local function panelButton(f)
-    tex(f, "Left", "Left");
-    tex(f, "Middle", "Middle");
-    tex(f, "Right", "Right");
-    P[f].fontString = fs(f, "Text", "Text");
-end
-T.UIPanelButtonTemplate, T.UIPanelButtonNoTooltipTemplate, T.GameMenuButtonTemplate = panelButton, panelButton,
-    panelButton;
-T.UIPanelDynamicResizeButtonTemplate, T.SharedButtonTemplate = panelButton, panelButton;
-
-local function closeButton(f)
-    f:SetScript("OnClick", function(self)
-        local parent = self:GetParent();
-        if parent then
-            parent:Hide();
-        end
-    end);
-end
-T.UIPanelCloseButton, T.UIPanelCloseButtonNoScripts = closeButton, function() end;
+T.ChatConfigCheckButtonTemplate, T.ChatConfigBaseCheckButtonTemplate = checkButton, function() end;
 
 T.BasicFrameTemplate = function(f)
     tex(f, nil, "Bg");
@@ -331,11 +325,10 @@ CharacterModelScene = frame("ModelScene", "CharacterModelScene", PaperDollFrame)
 PaperDollFrame.EquipmentManagerPane = frame("Frame", nil, PaperDollFrame, true);
 EquipmentFlyoutFrame = frame("Frame", "EquipmentFlyoutFrame", UIParent, true);
 GearManagerPopupFrame = frame("Frame", "GearManagerPopupFrame", PaperDollFrame, true);
+-- the slots are intrinsic ItemButtons (PaperDollItemSlotButtonTemplate): icon, Count, IconBorder... come from it
 for slotName, id in pairs(H.SLOT_IDS) do
     local b = frame("ItemButton", "Character" .. slotName, PaperDollItemsFrame);
     P[b].id = id;
-    tex(b, "IconTexture", "icon");
-    fs(b, "Count", "Count");
 end
 CharacterMicroButton = frame("Button", "CharacterMicroButton", UIParent);
 MerchantFrame = frame("Frame", "MerchantFrame", UIParent, true);
@@ -738,7 +731,8 @@ end
 function UIDropDownMenu_GetSelectedID(f)
     return f.selectedID;
 end
--- The player clicks the entry with this text in the menu built last (UIDropDownMenu or MenuUtil).
+-- The player clicks the entry with this text in the legacy UIDropDownMenu built last (menu.lua extends it to
+-- MenuUtil menus).
 function H.clickMenuEntry(text)
     for _, info in ipairs(H.dropdown.buttons) do
         if info.text == text then
@@ -752,35 +746,7 @@ function H.clickMenuEntry(text)
     error("harness: no menu entry '" .. tostring(text) .. "'", 2);
 end
 
-local function menuDescription()
-    local d = {};
-    local function add(text, fn, data)
-        table.insert(H.dropdown.buttons, {text = text, func = fn and function()
-            fn(data);
-        end});
-        return menuDescription();
-    end
-    d.CreateButton = function(_, text, fn, data)
-        return add(text, fn, data);
-    end
-    d.CreateCheckbox = function(_, text, isSelected, setSelected, data)
-        return add(text, setSelected, data);
-    end
-    d.CreateRadio = d.CreateCheckbox;
-    d.CreateTitle = function(_, text)
-        return add(text);
-    end
-    d.CreateDivider = function() end;
-    d.SetTooltip = function() end;
-    return d;
-end
-MenuUtil = {
-    CreateContextMenu = function(owner, generator)
-        H.dropdown.open, H.dropdown.buttons = owner, {};
-        generator(owner, menuDescription());
-        return {};
-    end,
-};
+-- MenuUtil, the Menu manager and dropdown buttons: menu.lua
 
 ---------------------------------------------------------------------------
 -- slash commands
