@@ -13,6 +13,10 @@
 -- button's own SetItemButtonTexture method, which does not call the global, so both are hooked. EllesmereUIBags redraws
 -- 0.1 s or more after the bag events, and its list paints its own icons: its windows' RefreshInventory is hooked too.
 -- The bag events and a light rescan while the merchant is open catch the rest.
+--
+-- GQ's button also marks the item as one not to sell: a dark wash over its icon and a small red cross in the icon's
+-- top-right corner (the corner Blizzard's and EllesmereUIBags' own badges leave free on gear). Both are GQ's textures
+-- on GQ's button, so they come and go with it.
 gearquipper = gearquipper or {};
 local c = gearquipper;
 
@@ -20,6 +24,10 @@ local OVERLAY_LEVELS = 5; -- above the slot and a bag add-on's text overlay on i
 local SCAN_INTERVAL = 0.5;
 local MAX_DEPTH = 8;
 local HIGHLIGHT_TEXTURE = "Interface\\Buttons\\ButtonHilight-Square";
+local WASH_ALPHA = 0.5; -- greyed out, the item still recognisable
+local CROSS_ATLAS = "common-icon-redx"; -- the forever client's own red cross (Blizzard_GuildRename)
+local CROSS_SIZE = 13;
+local CROSS_SHARE = 0.6; -- of a small icon at most (EllesmereUIBags' list rows), as its own badges
 
 -- bag windows by global name, looked up when needed (bag add-ons create theirs late)
 local WINDOWS = {"ContainerFrameCombinedBags", "EUI_Bags", "EUI_BagsReagent"};
@@ -156,6 +164,10 @@ local function CreateOverlay(button)
     highlight:SetAllPoints();
     highlight:SetTexture(HIGHLIGHT_TEXTURE);
     highlight:SetBlendMode("ADD");
+    overlay.Wash = overlay:CreateTexture(nil, "ARTWORK");
+    overlay.Wash:SetColorTexture(0, 0, 0, WASH_ALPHA);
+    overlay.Cross = overlay:CreateTexture(nil, "OVERLAY");
+    overlay.Cross:SetAtlas(CROSS_ATLAS);
     overlay:SetScript("OnClick", OnOverlayClick);
     overlay:SetScript("OnDragStart", OnOverlayDrag);
     overlay:SetScript("OnReceiveDrag", OnOverlayDrag);
@@ -164,6 +176,28 @@ local function CreateOverlay(button)
     overlay:Hide();
     overlays[button] = overlay;
     return overlay;
+end
+
+-- the marks go over the item's icon: the whole slot, or the icon column of an EllesmereUIBags list row
+local function PlaceMarks(overlay, button)
+    local icon = button._lvIcon;
+    local target = overlay;
+    if type(icon) == "table" and type(icon.IsShown) == "function" and icon:IsShown() then
+        target = icon;
+    end
+    if overlay.markedIcon ~= target then
+        overlay.markedIcon = target;
+        overlay.Wash:ClearAllPoints();
+        overlay.Wash:SetAllPoints(target);
+        overlay.Cross:ClearAllPoints();
+        overlay.Cross:SetPoint("TOPRIGHT", target, "TOPRIGHT", -1, -1);
+    end
+    local height = (target == overlay and button or target):GetHeight();
+    local size = CROSS_SIZE;
+    if type(height) == "number" and height > 0 then
+        size = math.min(CROSS_SIZE, math.floor(height * CROSS_SHARE + 0.5));
+    end
+    overlay.Cross:SetSize(size, size);
 end
 
 local function OnSlotTexture(button)
@@ -198,6 +232,7 @@ UpdateButton = function(button, protectedItems)
         if guarded then
             -- bag add-ons move their slots to other levels as their windows rise
             overlay:SetFrameLevel(button:GetFrameLevel() + OVERLAY_LEVELS);
+            PlaceMarks(overlay, button);
         end
         overlay:SetShown(guarded);
     end

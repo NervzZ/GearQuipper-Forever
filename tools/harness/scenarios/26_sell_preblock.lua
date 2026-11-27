@@ -10,7 +10,12 @@
 -- once, also after EllesmereUIBags' redraw 0.1 s after the bag events), a stale one swallows one click and goes; they
 -- are never made in combat (the buy-back stays the fallback) and keep asking in combat (Yes waits for its end). A Yes
 -- while another copy is being bought back waits for it to land, and that sale is not bought back. GQ never replaces a
--- slot button's scripts or writes on it (H.assertSlotButtonsUntouched).
+-- slot button's scripts or writes or draws on it (H.assertSlotButtonsUntouched).
+-- Every GQ button marks its item as one not to sell, so the player sees it before clicking: a dark wash (black, alpha
+-- 0.45-0.55) over the item's icon and a small red cross (atlas common-icon-redx, 12-14 px) in the icon's top-right
+-- corner, both drawn on GQ's button above the slot and a bag add-on's text overlay, under the hover highlight; the
+-- slot's own icon keeps its look. On an EllesmereUIBags list row the marks sit on the row's icon, on the whole row
+-- while the icon column is hidden. No slot without a GQ button shows a mark (assertOverlaysMatch checks every slot).
 
 local function settle(H, seconds)
     H.advance((seconds or 1) + 3 * H.latency);
@@ -62,6 +67,104 @@ local function overlayAt(H, bag, slot)
     end
 end
 
+local CROSS_ATLAS = "common-icon-redx";
+local LAYERS = {BACKGROUND = 1, BORDER = 2, ARTWORK = 3, OVERLAY = 4, HIGHLIGHT = 5};
+
+local function isWash(H, tex)
+    local color = H.state(tex).color;
+    return color ~= nil and color[1] == 0 and color[2] == 0 and color[3] == 0 and (color[4] or 1) >= 0.45
+        and (color[4] or 1) <= 0.55;
+end
+
+local function isCross(tex)
+    return tex:GetAtlas() == CROSS_ATLAS;
+end
+
+-- the visible washes and crosses anywhere on the slot button, its regions and its child frames
+local function visibleMarks(H, button)
+    local washes, crosses = {}, {};
+    local function visit(frame)
+        for _, region in ipairs({frame:GetRegions()}) do
+            if H.state(region).type == "Texture" and H.isVisible(region) then
+                if isWash(H, region) then
+                    washes[#washes + 1] = region;
+                elseif isCross(region) then
+                    crosses[#crosses + 1] = region;
+                end
+            end
+        end
+        for _, child in ipairs({frame:GetChildren()}) do
+            visit(child);
+        end
+    end
+    visit(button);
+    return washes, crosses;
+end
+
+-- the item's icon as the slot paints it: an EllesmereUIBags list row paints its own in its icon column
+local function iconOf(button)
+    local lvIcon = rawget(button, "_lvIcon");
+    if lvIcon then
+        return lvIcon:IsShown() and lvIcon or nil;
+    end
+    return button.icon;
+end
+
+local function drawnOn(H, region, overlay)
+    local frame = region:GetParent();
+    while frame and frame ~= overlay do
+        frame = frame:GetParent();
+    end
+    return frame == overlay;
+end
+
+-- GQ's button over the slot marks the item: one wash over the icon, one red cross in its top-right corner, both GQ's
+local function assertMarked(H, button, overlay, msg)
+    local washes, crosses = visibleMarks(H, button);
+    H.assertEq(#washes, 1, msg .. ": one wash");
+    H.assertEq(#crosses, 1, msg .. ": one red cross");
+    local wash, cross = washes[1], crosses[1];
+    H.assertTrue(drawnOn(H, wash, overlay) and drawnOn(H, cross, overlay), msg .. ": the marks are drawn on GQ's button");
+    local icon = iconOf(button);
+    -- over the icon: the whole slot, or a list row's icon (the whole row while the icon column is hidden)
+    local target = rawget(button, "_lvIcon") and icon or button;
+    H.assertTrue(H.liesOver(wash, target), msg .. ": the wash lies over the item's icon");
+    local point, relativeTo, relativePoint = cross:GetPoint(1);
+    H.assertEq(cross:GetNumPoints(), 1, msg .. ": the cross has one anchor");
+    H.assertEq(point .. ">" .. relativePoint, "TOPRIGHT>TOPRIGHT", msg .. ": the cross in the top-right corner");
+    H.assertTrue(relativeTo == target or (target == button and H.liesOver(relativeTo, button)),
+        msg .. ": of the icon");
+    -- 12-14 px, at most 0.6 of a small icon (a list row's) as EllesmereUIBags' own badges
+    local width, height = cross:GetSize();
+    local iconHeight = (icon and target == icon and icon or button):GetHeight();
+    local cap = iconHeight > 0 and math.floor(iconHeight * 0.6 + 0.5) or 14;
+    H.assertTrue(width == height and width >= math.min(12, cap) and width <= math.min(14, cap),
+        msg .. ": a small cross (" .. width .. " px on a " .. iconHeight .. " px icon)");
+    local washLayer, crossLayer = LAYERS[wash:GetDrawLayer()], LAYERS[cross:GetDrawLayer()];
+    H.assertTrue(crossLayer > washLayer, msg .. ": the cross above the wash");
+    H.assertTrue(crossLayer < LAYERS.HIGHLIGHT, msg .. ": both under the hover highlight");
+    local highlight;
+    for _, region in ipairs({overlay:GetRegions()}) do
+        if region:GetDrawLayer() == "HIGHLIGHT" then
+            highlight = region;
+        end
+    end
+    H.assertTrue(highlight and highlight:GetBlendMode() == "ADD" and H.liesOver(highlight, button),
+        msg .. ": the hover highlight lights the slot");
+    -- the slot's own icon shows as without GQ
+    if icon then
+        local r, g, b = icon:GetVertexColor();
+        H.assertEq(string.format("%g,%g,%g,%g", r, g, b, icon:GetAlpha()), "1,1,1,1", msg .. ": the icon's colours");
+        local info = C_Container.GetContainerItemInfo(button:GetBagID(), button:GetID());
+        H.assertEq(icon:IsDesaturated(), info.isLocked and true or false, msg .. ": desaturated only while locked");
+    end
+end
+
+local function assertUnmarked(H, button, msg)
+    local washes, crosses = visibleMarks(H, button);
+    H.assertEq(#washes + #crosses, 0, msg .. ": no mark");
+end
+
 -- the (first) copy of key in the bags has GQ's button on top; returns it, bag, slot
 local function assertGuarded(H, key, msg)
     local bag, slot = H.bagSlotOf(key);
@@ -69,6 +172,11 @@ local function assertGuarded(H, key, msg)
     H.assertTrue(overlay, msg .. ": GQ's button over " .. key);
     local button = H.bagSlotButton(bag, slot);
     H.assertTrue(overlay:GetFrameLevel() > button:GetFrameLevel(), msg .. ": above the slot");
+    local textOverlay = rawget(button, "_textOverlay");
+    if textOverlay then
+        H.assertTrue(overlay:GetFrameLevel() > textOverlay:GetFrameLevel(), msg .. ": above the bag add-on's overlay");
+    end
+    assertMarked(H, button, overlay, msg .. " (" .. key .. ")");
     return overlay, bag, slot;
 end
 
@@ -80,7 +188,7 @@ end
 local GUARDED = {headA = true, chestA = true, legsA = true, feetA = true, handsA = true, backA = true, ringA = true,
     trinketA = true, sword = true, shield = true};
 
--- every visible slot: GQ's button on top exactly when it holds a guarded item
+-- every visible slot: GQ's button and its marks on top exactly when it holds a guarded item
 local function assertOverlaysMatch(H, msg, guarded)
     guarded = guarded or GUARDED;
     local checked = 0;
@@ -89,8 +197,14 @@ local function assertOverlaysMatch(H, msg, guarded)
             local bag, slot = button:GetBagID(), button:GetID();
             local inst = H.bags[bag] and H.bags[bag].slots[slot];
             local hit = H.frameAtBagSlot(bag, slot);
-            H.assertEq(hit ~= button, inst ~= nil and guarded[inst.key] == true, string.format(
-                "%s: GQ's button over bag %d slot %d (%s)", msg, bag, slot, inst and inst.key or "empty"));
+            local where = string.format("%s: bag %d slot %d (%s)", msg, bag, slot, inst and inst.key or "empty");
+            local isGuarded = inst ~= nil and guarded[inst.key] == true;
+            H.assertEq(hit ~= button, isGuarded, where .. ": GQ's button over it");
+            if isGuarded then
+                assertMarked(H, button, hit, where);
+            else
+                assertUnmarked(H, button, where);
+            end
             checked = checked + 1;
         end
     end
@@ -371,6 +485,7 @@ local function merchantAndOption(H, gq)
     local overlay, bag, slot = assertGuarded(H, "headA", "merchant open");
     H.closeMerchant();
     H.advance(0.2);
+    assertUnmarked(H, H.bagSlotButton(bag, slot), "the helm's marks go with the merchant");
     H.assertFalse(overlay:IsShown(), "GQ's button goes with the merchant");
     assertOverlaysMatch(H, "merchant closed", {});
     H.openMerchant();
@@ -381,6 +496,7 @@ local function merchantAndOption(H, gq)
     local box = optionBox(H, "Protect set items from selling");
     box:Click("LeftButton");
     H.assertEq(GQ_OPTIONS[gq.OPT_PROTECT_SELL], false, "option off");
+    assertUnmarked(H, H.bagSlotButton(bag, slot), "the helm's marks go with the option");
     assertOverlaysMatch(H, "option off", {});
     H.clickBagSlot(bag, slot, "RightButton");
     settle(H);
@@ -422,6 +538,7 @@ local function blizzardRecycled(H, gq)
     H.closeBags();
     H.openBags("combined");
     H.assertTrue(H.bagSlotButton(bag, slot) ~= button, "another slot button shows the helm now");
+    assertGuarded(H, "headA", "the marks follow the helm to its new slot button");
     assertOverlaysMatch(H, "right after reopening");
     H.clickBagSlot(bag, slot, "RightButton");
     assertAsked(H, "Helm of the Bastion", "sets Default, Tank", "after reopening");
@@ -457,6 +574,15 @@ end
 local function euiRecycled(H, gq)
     prepare(H, gq, "eui");
     assertOverlaysMatch(H, "opened");
+    if H.euiBags.view == "list" then
+        -- the icon column hidden: the marks cover the whole row; shown again: back on the row's icon
+        H.euiBags.showListIcons(false);
+        H.euiBags.window:RefreshInventory();
+        assertOverlaysMatch(H, "no icon column");
+        H.euiBags.showListIcons(true);
+        H.euiBags.window:RefreshInventory();
+        assertOverlaysMatch(H, "icon column again");
+    end
     local bag, slot = H.bagSlotOf("headA");
     local button = H.bagSlotButton(bag, slot);
     local gbag, gslot = H.bagSlotOf("gun"); -- "Gun of Testing" is listed right before the helm
@@ -469,6 +595,7 @@ local function euiRecycled(H, gq)
     end), "another slot button shows the helm now");
     H.assertEq(H.bagSlotButton(bag, slot), gunButton, "the helm moved into the gun's row");
     H.assertEq(H.countItem("gun"), 0, "gun sold");
+    assertGuarded(H, "headA", "the marks follow the helm into the gun's row");
     assertOverlaysMatch(H, "right after the redraw");
     H.clickBagSlot(bag, slot, "RightButton");
     assertAsked(H, "Helm of the Bastion", "sets Default, Tank", "right after the redraw");

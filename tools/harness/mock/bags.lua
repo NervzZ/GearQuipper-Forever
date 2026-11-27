@@ -12,8 +12,9 @@
 -- HandleModifiedItemClick; left: C_Container.PickupContainerItem = pick up / place; right with the merchant open:
 -- H.sellBagItem = the refund popup or a sale; right otherwise: UseContainerItem), OnEnter (GameTooltip:SetBagItem),
 -- OnLeave, OnDragStart / OnReceiveDrag (= a left click). The scripts and fields a slot button has from Blizzard and its
--- bag window are recorded: H.slotButtonTampering(button) lists every script replaced or hooked and every field
--- written by anyone else (a hooksecurefunc wrapper excepted); H.assertSlotButtonsUntouched() checks them all.
+-- bag window are recorded: H.slotButtonTampering(button) lists every script replaced or hooked, every field
+-- written by anyone else (a hooksecurefunc wrapper excepted) and every texture or font string added to the button
+-- itself (another add-on draws on its own child frame); H.assertSlotButtonsUntouched() checks them all.
 --
 -- Windows (each refreshes on show and on bag events; EUI_Bags 0.1 s after them, as EllesmereUIBags' debounce):
 --   ContainerFrameCombinedBags  Blizzard's combined bags (bags 0..4); its pool hands the buttons out again on every
@@ -23,7 +24,9 @@
 --                               setup, so it loads before GQ): EUI_Bags shows bags 0..4, items sorted by name, then the
 --                               empty slots; a refresh hands the buttons out in that order (an item moves to another
 --                               button when the list changes); EUI_BagsReagent shows bag 5. H.euiBags.raise(n) lifts
---                               the window n levels (its slots follow at the next refresh).
+--                               the window n levels (its slots follow at the next refresh). The list view's row
+--                               paints its icon (_lvIcon, 20x20 at the row's left) only while its icon column shows:
+--                               H.euiBags.showListIcons(false) hides the column from the next refresh on.
 --
 -- Player actions: a click lands on the TOPMOST visible, mouse-enabled frame over the slot (the slot button and the
 -- frames lying over all of it: anchored with both corners to it; Buttons take the mouse unless EnableMouse(false)),
@@ -38,6 +41,8 @@
 --   H.dropOnMerchant()           releases the cursor item over the merchant window (sells it)
 --   H.hoverBagSlot(bag, slot)    the mouse moves onto the slot (OnLeave on the last hovered frame, OnEnter); returns it
 --   H.leaveBagSlot()
+--   H.liesOver(region, target)   the frame or texture lies over all of target (both corners on it, or on a frame that
+--                                lies over it)
 -- Logs: H.modifiedClicks {link, action = "CHATLINK" (shift) / "DRESSUP" (ctrl) / nil, itemLocation}.
 local H = ...;
 local P = H.widgetState;
@@ -110,9 +115,12 @@ local function ownSet(button, key, value)
 end
 
 local function registerSlotButton(button)
-    local fields, scripts, hooks = {}, {}, {};
+    local fields, scripts, hooks, regions = {}, {}, {}, {};
     for k, v in pairs(button) do
         fields[k] = v;
+    end
+    for _, region in ipairs(P[button].regions) do
+        regions[region] = true;
     end
     for name, fn in pairs(P[button].scripts) do
         scripts[name] = fn;
@@ -120,7 +128,7 @@ local function registerSlotButton(button)
     for name, list in pairs(P[button].hooks) do
         hooks[name] = #list;
     end
-    baseline[button] = {fields = fields, scripts = scripts, hooks = hooks};
+    baseline[button] = {fields = fields, scripts = scripts, hooks = hooks, regions = regions};
     slotButtons[#slotButtons + 1] = button;
 end
 
@@ -151,6 +159,11 @@ function H.slotButtonTampering(button)
     for name, list in pairs(p.hooks) do
         if #list ~= (base.hooks[name] or 0) then
             problems[#problems + 1] = "script " .. name .. " hooked";
+        end
+    end
+    for _, region in ipairs(p.regions) do
+        if not base.regions[region] then
+            problems[#problems + 1] = P[region].type .. " added";
         end
     end
     return problems;
@@ -398,7 +411,10 @@ local function euiWindow(name, bagIds, view, sorted, debounced)
         textOverlay:SetAllPoints();
         button._textOverlay = textOverlay;
         if view == "list" then
+            -- EllesmereUIBags_List.lua CreateListRow / RenderRow: ICON_SIZE 20, at the icon column's x
             button._lvIcon = button:CreateTexture(nil, "ARTWORK");
+            button._lvIcon:SetSize(20, 20);
+            button._lvIcon:SetPoint("LEFT", button, "LEFT", 4, 0);
         end
         registerSlotButton(button);
         slots[i] = button;
@@ -448,6 +464,7 @@ local function euiWindow(name, bagIds, view, sorted, debounced)
                 button._textOverlay:SetFrameLevel(button:GetFrameLevel() + 3);
                 if view == "list" then
                     button._lvIcon:SetTexture(data.info and data.info.iconFileID);
+                    button._lvIcon:SetShown(data.info ~= nil and H.euiBags.listIcons);
                     SetItemButtonDesaturated(button, data.info and data.info.isLocked);
                 else
                     refreshSlot(button, data.info);
@@ -483,9 +500,12 @@ function H.installEuiBags(opts)
     local view = opts.view or "grid";
     local bags = euiWindow("EUI_Bags", {0, 1, 2, 3, 4}, view, true, true);
     local reagent = euiWindow("EUI_BagsReagent", {5}, "grid", false);
-    H.euiBags = {window = bags, reagent = reagent, view = view};
+    H.euiBags = {window = bags, reagent = reagent, view = view, listIcons = true};
     function H.euiBags.raise(levels)
         bags:SetFrameLevel(bags:GetFrameLevel() + levels);
+    end
+    function H.euiBags.showListIcons(shown)
+        H.euiBags.listIcons = shown and true or false;
     end
     return H.euiBags;
 end
@@ -562,6 +582,11 @@ local function covers(frame, slot, guard)
         end
     end
     return topLeft ~= nil and topLeft == bottomRight and P[topLeft] ~= nil and covers(topLeft, slot, (guard or 0) + 1);
+end
+
+-- a frame or texture lies over all of target (a slot button, an icon texture), as a click or the eye sees it
+function H.liesOver(region, target)
+    return covers(region, target);
 end
 
 local function frameAt(slot)
