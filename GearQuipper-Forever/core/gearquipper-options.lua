@@ -153,7 +153,10 @@ local function BuildOptionsPanel()
         optionsPanel.margin);
     optionsPanel.elementIndex = optionsPanel.elementIndex + 1;
 
-    chProtectSell = CreateOptionToggle(c.OPT_PROTECT_SELL, c:GetText("Protect set items from selling"));
+    chProtectSell = CreateOptionToggle(c.OPT_PROTECT_SELL, c:GetText("Protect set items from selling"), nil,
+        function()
+            c:RefreshSellBlock();
+        end);
     optionsPanel.elementIndex = optionsPanel.elementIndex + 1;
 
     chProtectDelete = CreateOptionToggle(c.OPT_PROTECT_DELETE, c:GetText("Protect set items from deleting"));

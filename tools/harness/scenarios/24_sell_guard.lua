@@ -7,6 +7,9 @@
 -- questions; a junk seller that keeps selling the item is given up after 3 buy-backs with one chat hint; gold ends
 -- where it would without the guard. A spec swap (it changes every buyback link) neither undoes a confirmed sale nor
 -- loses an item waiting for the next merchant.
+-- No bag window is open here, so GQ has no button over the slots: H.sellBagItem is the slot's own right-click, as on a
+-- slot GQ does not cover (a bag add-on it does not know, a slot first seen in combat). The right-click GQ catches
+-- before the sale is scenario 26.
 
 local function settle(H, seconds)
     H.advance((seconds or 1) + 3 * H.latency);

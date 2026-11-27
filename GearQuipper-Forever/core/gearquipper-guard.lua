@@ -1,9 +1,11 @@
 -- GearQuipper Forever: sell and delete guard for items saved in a set.
 --
--- Selling: nothing can cancel a sale beforehand without tainting Blizzard's bag buttons, so the guard undoes it. It
+-- Selling: a right-click on such an item in the bags is caught before the sale by GQ's own button on top of the slot
+-- (gearquipper-guard-bags.lua), which asks first and sells that copy on Yes. Every other sale is undone: the guard
 -- compares the merchant's buyback list with the last one it saw; a set item the player cannot spare is bought back at
 -- once, then GQ asks. Yes lets that one copy through and sells it again. Looking only at the buyback list catches
--- every sell path (right-click, drag, the trade-timer popup, junk sellers, Sell All Junk) and hooks nothing.
+-- every sell path (a drag onto the merchant, the trade-timer popup, junk sellers, Sell All Junk, a slot GQ has no
+-- button on) and hooks nothing.
 --
 -- Deleting and refunding: Blizzard's own popup does the work, so the delete stays untainted. The guard only disables
 -- the popup's Yes button (a widget call that writes no Lua value) and shows its own warning under the popup until the
@@ -18,24 +20,30 @@ local DIALOG_WIDTH, BUTTON_WIDTH = 360, 150;
 ---------------------------------------------------------------------------
 -- set items
 ---------------------------------------------------------------------------
+-- itemString -> copies of it one set holds. Ammo is left out: slot 0 stores an item id.
+local function SetItemCounts(setName)
+    local partial, counts = c:LoadPartialOption(setName), {};
+    for slotId in pairs(c:GetSlotInfo()) do
+        if slotId ~= INVSLOT_AMMO and (not partial or c:LoadSlotState(slotId, setName)) then
+            local stored = c:LoadSlot(slotId, setName);
+            local itemString = type(stored) == "string" and c:NormalizeItemString(stored);
+            if itemString then
+                counts[itemString] = (counts[itemString] or 0) + 1;
+            end
+        end
+    end
+    return counts;
+end
+
 -- Copies of itemString one set needs at most (only one set is worn at a time), and the sets holding it (sorted).
--- Ammo is left out: slot 0 stores an item id.
 local function CopiesNeeded(itemString)
     local needed, setNames = 0, {};
     if type(itemString) ~= "string" or itemString == c.VALUE_NONE then
         return needed, setNames;
     end
     for _, setName in ipairs(c:LoadSetNames()) do
-        local partial, count = c:LoadPartialOption(setName), 0;
-        for slotId in pairs(c:GetSlotInfo()) do
-            if slotId ~= INVSLOT_AMMO and (not partial or c:LoadSlotState(slotId, setName)) then
-                local stored = c:LoadSlot(slotId, setName);
-                if type(stored) == "string" and c:NormalizeItemString(stored) == itemString then
-                    count = count + 1;
-                end
-            end
-        end
-        if count > 0 then
+        local count = SetItemCounts(setName)[itemString];
+        if count then
             setNames[#setNames + 1] = setName;
             needed = math.max(needed, count);
         end
@@ -43,14 +51,12 @@ local function CopiesNeeded(itemString)
     return needed, setNames;
 end
 
--- Copies of itemString the player carries: worn and in the bags, plus the bank tabs while the bank is open.
--- Locked copies are skipped unless countLocked: an item being sold stays in its slot, locked, until the server answers.
-local function CopiesOwned(itemString, countLocked, withBank)
-    local count = 0;
+-- Calls fn(itemString, locked) for every item worn and in the bags, plus the bank tabs while the bank is open (withBank).
+local function ForEachOwned(withBank, fn)
     for slotId = INVSLOT_FIRST_EQUIPPED or 1, INVSLOT_LAST_EQUIPPED or 19 do
-        if c:GetItemString(slotId) == itemString and
-            (countLocked or c:ReadState(IsInventoryItemLocked, slotId) ~= true) then
-            count = count + 1;
+        local itemString = c:GetItemString(slotId);
+        if itemString ~= c.VALUE_NONE then
+            fn(itemString, c:ReadState(IsInventoryItemLocked, slotId) == true);
         end
     end
     local bagIds = c:GetBagIds();
@@ -62,14 +68,23 @@ local function CopiesOwned(itemString, countLocked, withBank)
     for _, bagId in ipairs(bagIds) do
         for slotId = 1, c:GetContainerNumSlots(bagId) do
             local link = c:GetContainerItemLink(bagId, slotId);
-            if link and c:GetItemString(link) == itemString then
+            if link then
                 local _, _, locked = c:GetContainerItemInfo(bagId, slotId);
-                if countLocked or not locked then
-                    count = count + 1;
-                end
+                fn(c:GetItemString(link), locked and true or false);
             end
         end
     end
+end
+
+-- Copies of itemString the player carries. Locked copies are skipped unless countLocked: an item being sold stays in
+-- its slot, locked, until the server answers.
+local function CopiesOwned(itemString, countLocked, withBank)
+    local count = 0;
+    ForEachOwned(withBank, function(owned, locked)
+        if owned == itemString and (countLocked or not locked) then
+            count = count + 1;
+        end
+    end);
     return count;
 end
 
@@ -148,8 +163,8 @@ local tries = {};     -- itemString -> BuybackItem calls this visit
 local capHinted = {}; -- itemString -> true once the cap hint was printed this visit
 local bypass = {};    -- itemString -> confirmed sales to let through
 local rescues = {};   -- oldest sale first: {itemString, link, copies = copies to buy back, inflight = {owned, retryAt}, ask}
-local resell = {};    -- itemStrings confirmed, waiting to be sold again
-local askQueue = {};  -- {itemString, link}, shown one at a time
+local resell = {};    -- confirmed sales waiting to be made: {itemString[, bagId, slotId]} (with a slot: that copy)
+local askQueue = {};  -- {itemString, link[, bagId, slotId]}, shown one at a time; with a slot: asked before the sale
 local askFrame;
 
 -- Reads the buyback list and returns the entries added since the last read ({index, link}). Sales append (the oldest
@@ -224,14 +239,29 @@ local function RemoveAsks(itemString)
     ShowNextAsk();
 end
 
-local function QueueAsk(itemString, link)
+-- bagId, slotId: asked before the sale, Yes sells that copy
+local function QueueAsk(itemString, link, bagId, slotId)
     for _, entry in ipairs(askQueue) do
         if entry.itemString == itemString then
             return;
         end
     end
-    askQueue[#askQueue + 1] = {itemString = itemString, link = link};
+    askQueue[#askQueue + 1] = {itemString = itemString, link = link, bagId = bagId, slotId = slotId};
     ShowNextAsk();
+end
+
+-- A Yes given before the sale sells that copy, when it is still in its slot and not on the cursor; returns true then.
+-- A copy that left its slot meanwhile (moved, or sold another way and being bought back) is sold like a Yes after a
+-- buy-back: any copy, once it is back.
+local function SellAskedCopy(entry)
+    local link = c:GetContainerItemLink(entry.bagId, entry.slotId);
+    local _, _, locked = c:GetContainerItemInfo(entry.bagId, entry.slotId);
+    bypass[entry.itemString] = (bypass[entry.itemString] or 0) + 1;
+    if link and not locked and c:GetItemString(link) == entry.itemString then
+        c:SellContainerItem(entry.bagId, entry.slotId);
+        return true;
+    end
+    return false;
 end
 
 local function ProcessResell()
@@ -239,10 +269,22 @@ local function ProcessResell()
         return;
     end
     for i = #resell, 1, -1 do
-        local itemString = resell[i];
-        -- the copy bought back has to land first
-        if not FindRescue(itemString) then
-            for _, location in ipairs(c:FindItemInBags(itemString) or {}) do
+        local entry = resell[i];
+        if entry.bagId and FindRescue(entry.itemString) then
+            -- another copy being bought back lands first: a sale now would look like no landing, and the rescue's
+            -- retry would buy this confirmed sale back
+            entry = nil;
+        elseif entry.bagId then
+            if SellAskedCopy(entry) then
+                table.remove(resell, i);
+                entry = nil;
+            else
+                entry = {itemString = entry.itemString};
+                resell[i] = entry;
+            end
+        end
+        if entry and not FindRescue(entry.itemString) then -- the copy bought back has to land first
+            for _, location in ipairs(c:FindItemInBags(entry.itemString) or {}) do
                 local _, _, locked = c:GetContainerItemInfo(location.bagId, location.slotId);
                 if not locked then
                     table.remove(resell, i);
@@ -360,9 +402,12 @@ local function AnswerAsk(sell)
                 break;
             end
         end
-        if sell then
+        if sell and entry.bagId then
+            resell[#resell + 1] = {itemString = entry.itemString, bagId = entry.bagId, slotId = entry.slotId};
+            ProcessResell();
+        elseif sell then
             bypass[entry.itemString] = (bypass[entry.itemString] or 0) + 1;
-            resell[#resell + 1] = entry.itemString;
+            resell[#resell + 1] = {itemString = entry.itemString};
             ProcessResell();
         end
     end
@@ -393,6 +438,43 @@ ShowNextAsk = function()
     SetDialogText(f, c:GetText("Are you sure you want to sell %s? This item is saved in %s.", entry.link,
         SetsText(select(2, CopiesNeeded(entry.itemString)))), YES or c:GetText("Yes"), NO or c:GetText("No"));
     f:Show();
+end
+
+-- for gearquipper-guard-bags.lua
+function c:IsSellGuardActive()
+    return merchantOpen and c.initFinished and SellGuardEnabled() and true or false;
+end
+
+-- Item strings (as keys) of the set items whose next sale the guard stops: the player carries (worn and in the bags,
+-- locked copies too) no more copies than one set needs.
+function c:GetSellProtectedItems()
+    local protected, needed = {}, {};
+    for _, setName in ipairs(c:LoadSetNames()) do
+        for itemString, count in pairs(SetItemCounts(setName)) do
+            needed[itemString] = math.max(needed[itemString] or 0, count);
+        end
+    end
+    if next(needed) == nil then
+        return protected;
+    end
+    local owned = {};
+    ForEachOwned(false, function(itemString)
+        owned[itemString] = (owned[itemString] or 0) + 1;
+    end);
+    for itemString, count in pairs(needed) do
+        if (owned[itemString] or 0) <= count then
+            protected[itemString] = true;
+        end
+    end
+    return protected;
+end
+
+-- A right-click on the item at bagId/slotId, caught before the sale: GQ asks first, Yes sells that copy.
+function c:AskBeforeSale(bagId, slotId)
+    local link = merchantOpen and c:GetContainerItemLink(bagId, slotId);
+    if link then
+        QueueAsk(c:GetItemString(link), link, bagId, slotId);
+    end
 end
 
 local function MerchantShown()

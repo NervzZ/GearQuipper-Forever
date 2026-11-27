@@ -368,6 +368,21 @@ function c:SellContainerItem(bagId, slotId)
     return C_Container.UseContainerItem(bagId, slotId);
 end
 
+-- True when a right-click at a merchant offers a refund for the bag item instead of selling it
+-- (ContainerFrame_GetExtendedPriceString).
+function c:IsRefundableContainerItem(bagId, slotId)
+    local info = C_Container.GetContainerItemPurchaseInfo and
+        c:SafeCall(C_Container.GetContainerItemPurchaseInfo, bagId, slotId, false);
+    if type(info) ~= "table" then
+        return false;
+    end
+    local ok, refundable = pcall(function()
+        return info.refundSeconds ~= nil and
+            ((info.money or 0) > 0 or (info.itemCount or 0) > 0 or (info.currencyCount or 0) > 0);
+    end);
+    return ok and refundable == true;
+end
+
 ---------------------------------------------------------------------------
 -- cursor and item GUIDs (delete guard)
 ---------------------------------------------------------------------------

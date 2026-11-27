@@ -24,6 +24,8 @@
 --   mock/merchant.lua   buyback list + sell paths, money, item GUIDs / ItemLocation / C_Cursor, Blizzard's
 --                       delete / refund / trade-timer popups (StaticPopup2-4) + PopupEventManager
 --   mock/gamepad.lua    the popups' gamepad button sequence (one-shot per popup frame, as on Forever)
+--   mock/bags.lua       Blizzard's bag windows (combined + separate), ContainerFrameItemButtonTemplate slot buttons
+--                       (tampering check), an EllesmereUIBags-style window, clicks / drags / hover on a bag slot
 --   mock/suites.lua     EllesmereUI / ElvUI stubs (scenario field `suites`, or H.installSuites from setup)
 --   mock/assert.lua     assertions and scenario helpers
 --
@@ -50,6 +52,9 @@
 --   merchant     sellBagItem dragToMerchant sellAllJunk closeMerchant bagSlotOf buyback buybackCalls money
 --   popups       blizzPopup clickPopup typeInPopup enterInPopup deleteItem gamepadDeleteItem gamepadConfirm
 --                simulateAutoFillDelete simulateLeatrixEasyDestroy deleted refunded (mock/merchant.lua)
+--   bags         openBags(kind) closeBags installEuiBags bagSlotButton frameAtBagSlot clickBagSlot dragBagSlot
+--                dropOnBagSlot dropOnMerchant hoverBagSlot leaveBagSlot assertSlotButtonsUntouched modifiedClicks
+--                (mock/bags.lua)
 local H = ...;
 
 H.include("mock/env.lua");
@@ -68,6 +73,7 @@ H.include("mock/menu.lua");
 H.include("mock/colorpicker.lua");
 H.include("mock/merchant.lua");
 H.include("mock/gamepad.lua");
+H.include("mock/bags.lua");
 H.include("mock/suites.lua");
 H.include("mock/assert.lua");
 
