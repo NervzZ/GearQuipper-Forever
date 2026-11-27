@@ -6,6 +6,7 @@
 ## IconTexture: Interface\Icons\INV_Chest_Plate16
 ## SavedVariables: GQ_DATA, GQ_OPTIONS
 ## OptionalDeps: LibStub, LibDataBroker-1.1, CallbackHandler-1.0, EllesmereUI, ElvUI
+## X-Curse-Project-ID: 1834323
 
 libs\LibStub\LibStub.lua
 libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
