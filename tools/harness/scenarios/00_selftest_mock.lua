@@ -326,6 +326,78 @@ local function selfTestSuites(H)
     H.assertTrue(direct ~= nil);
 end
 
+-- bag windows: slot buttons, the frame a click hits, recycled buttons, the tampering check
+local function selfTestBags(H)
+    H.give("twinBlade");
+    H.openMerchant();
+    H.openBags("combined");
+    local bag, slot = H.bagSlotOf("orb");
+    local orb = H.bags[bag].slots[slot];
+    local button = H.bagSlotButton(bag, slot);
+    H.assertEq(button:GetBagID(), bag, "Blizzard's slot knows its bag");
+    H.assertEq(rawget(button, "bagID"), bag, "through the bagid attribute");
+    H.assertEq(H.frameAtBagSlot(bag, slot), button, "nothing on top");
+    H.assertEq(#H.slotButtonTampering(button), 0, "untouched");
+
+    -- frames on top: a plain Frame and a lower Button do not take the mouse, a higher Button does
+    local cover = CreateFrame("Frame", nil, button);
+    cover:SetAllPoints();
+    cover:SetFrameLevel(button:GetFrameLevel() + 3);
+    local low = CreateFrame("Button", nil, button);
+    low:SetAllPoints();
+    low:SetFrameLevel(button:GetFrameLevel() - 1);
+    H.assertEq(H.frameAtBagSlot(bag, slot), button, "a Frame and a lower Button let the click through");
+    local top = CreateFrame("Button", nil, button);
+    top:SetAllPoints(button);
+    top:SetFrameLevel(button:GetFrameLevel() + 5);
+    local clicks = {};
+    top:SetScript("OnClick", function(_, mouseButton)
+        clicks[#clicks + 1] = mouseButton;
+    end);
+    H.assertEq(H.frameAtBagSlot(bag, slot), top, "a higher Button takes the click");
+    H.assertEq(H.clickBagSlot(bag, slot, "RightButton"), top, "the right-click lands on it");
+    H.assertEq(#clicks, 0, "not registered for the right button: nothing happens");
+    H.clickBagSlot(bag, slot, "LeftButton");
+    H.assertEq(clicks[1], "LeftButton", "registered for the left button by default");
+    H.assertEq(H.bags[bag].slots[slot], orb, "the frame on top kept the orb from being sold");
+    top:Hide();
+
+    -- the slot's own right-click sells at the merchant (Blizzard's secure path), a shift-click links
+    H.clickBagSlot(bag, slot, "RightButton", {shift = true});
+    H.assertEq(H.modifiedClicks[#H.modifiedClicks].action, "CHATLINK", "shift-click links");
+    H.clickBagSlot(bag, slot, "RightButton");
+    H.advance(0.1);
+    H.assertEq(H.sold[#H.sold], orb, "right-click sold the orb");
+
+    -- the pool hands its buttons out the other way round after a reopen
+    bag, slot = H.bagSlotOf("twinBlade");
+    button = H.bagSlotButton(bag, slot);
+    H.closeBags();
+    H.openBags("combined");
+    H.assertTrue(H.bagSlotButton(bag, slot) ~= button, "another button shows the slot after a reopen");
+
+    -- tampering: a field written or a script hooked shows; a hooksecurefunc on a method does not
+    hooksecurefunc(button, "SetItemButtonTexture", function() end);
+    H.assertEq(#H.slotButtonTampering(button), 0, "hooksecurefunc is fine");
+    button.selfTestField = true;
+    button:HookScript("OnClick", function() end);
+    local problems = table.concat(H.slotButtonTampering(button), "; ");
+    H.assertTrue(problems:find("field selfTestField written", 1, true), "field write found: " .. problems);
+    H.assertTrue(problems:find("script OnClick hooked", 1, true), "hook found: " .. problems);
+    H.closeBags();
+
+    -- EllesmereUIBags: the bag is the parent's id
+    H.installEuiBags({view = "list"});
+    H.openBags("eui");
+    bag, slot = H.bagSlotOf("twinBlade");
+    button = H.bagSlotButton(bag, slot);
+    H.assertEq(rawget(button, "bagID"), nil, "no bagid attribute");
+    H.assertEq(button:GetParent():GetID(), bag, "the parent's id is the bag");
+    H.assertEq(H.frameAtBagSlot(bag, slot), button, "the text overlay does not take the mouse");
+    H.closeBags();
+    H.closeMerchant();
+end
+
 return {
     noAddon = true,
     latency = 0, -- the latency section below switches it on by itself
@@ -500,6 +572,7 @@ return {
         selfTestScrollBox(H);
         selfTestMenus(H);
         selfTestSuites(H);
+        selfTestBags(H);
         H.log("self-test reached the end; uiErrors:", #H.uiErrors, "events:", #H.eventLog);
     end,
 };

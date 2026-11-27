@@ -44,4 +44,3 @@ L["The AddOn has not been initialized due to an error. Please relog and try agai
 L["This will reset GearQuipper to defaults. All your sets will be lost.\n\nAre you sure?"]              = "这将会使GearQuipper恢复到默认. 你的所有设置会丢失.\n\n你确定吗?";
 L["Unknown command. Possible parameters are: /gq ..."]                                                  = "未知的命令. 可能的参数是: /gq ...";
 L["visible"]                                                                                            = "可见的";
-L["Visit https://www.curseforge.com/wow/addons/gearquipper for support, feedback and updates."]         = "浏览https://www.curseforge.com/wow/addons/gearquipper 进行支持, 反馈和更新."

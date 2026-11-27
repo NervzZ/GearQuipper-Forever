@@ -46,4 +46,3 @@ L["Save set"]                                                                   
 
 
 L["visible"]                                                                                            = "visible";
-L["Visit https://www.curseforge.com/wow/addons/gearquipper for support, feedback and updates."]         = "Visiter https://www.curseforge.com/wow/addons/gearquipper pour assistance, retour et mises à jour."

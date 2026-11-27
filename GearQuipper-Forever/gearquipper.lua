@@ -6,6 +6,7 @@ c.name = "GearQuipper";
 GQ_OPTIONS = GQ_OPTIONS or {};
 GQ_DATA = GQ_DATA or {};
 
+-- version of the saved data, drives the migrations in Init only; players see the TOC version (c:GetVersion)
 local GQ_VERSION = 56;
 
 c.VALUE_NONE = "VALUE_NONE";
@@ -39,16 +40,20 @@ function c:Init()
 
         GQ_OPTIONS[c.OPT_SHOW_WATERMARK] = true;
         GQ_OPTIONS[c.OPT_VERSION] = GQ_VERSION; -- finish update
-        c:Println(c:GetText("Update to version %s complete.", GQ_VERSION));
+        c:Println(c:GetText("Update to version %s complete.", c:GetVersion()));
     end
 
     c.debugMode = false;
     c.initFinished = true;
-    c:Println(c:GetText("AddOn loaded: Version: %s. Type /gq for options.", GQ_VERSION));
-    c:Println(c:GetText("Visit https://www.curseforge.com/wow/addons/gearquipper for support, feedback and updates."));
+    c:Println(c:GetText("AddOn loaded: Version: %s. Type /gq for options.", c:GetVersion()));
 end
 
+-- the release version from the TOC (what players see)
 function c:GetVersion()
+    local version = c:GetAddOnMetadata("Version");
+    if version and version ~= "" then
+        return version;
+    end
     return GQ_VERSION;
 end
 
