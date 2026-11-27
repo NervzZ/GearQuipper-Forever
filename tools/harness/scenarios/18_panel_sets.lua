@@ -1,5 +1,5 @@
 -- (r) The panel's Sets tab (stock look, no UI suite): Blizzard gear-set cards in a WowScrollBoxList; left-click
--- equips (rows locked and dimmed while switching), the tick follows the current set, red names for missing items,
+-- equips (rows locked and dimmed while switching), the tick follows the current set, a red tag for missing items,
 -- hover dims slots and shows the missing items, the right-click menu (equip, save, partial -> slot boxes, bank
 -- entries only at the bank, delete with its popup), a switch or combat closes an open set menu and its entries do
 -- nothing while locked, inline bank buttons at the bank, the scroll position kept by refreshes, recycled rows without
@@ -22,8 +22,9 @@ local function assertRowsConsistent(H, gq, panel, msg)
         H.assertEq(row:GetAlpha(), 1, where .. " not dimmed");
         H.assertTrue(row:IsEnabled(), where .. " enabled");
         local r, g, b = row.Name:GetTextColor();
-        local red = r == 1 and g == 0 and b == 0;
-        H.assertEq(red, not gq:IsSetAvailable(name), where .. " red only when items are missing");
+        H.assertTrue(r == 1 and g == 0.82 and b == 0, where .. " gold name (no set colour), never red");
+        H.assertEq(row.Missing:IsShown(), not gq:IsSetAvailable(name),
+            where .. " missing tag only when items are missing");
     end
 end
 
@@ -63,7 +64,11 @@ return {
         H.assertEq(panel.setRow("Chest").Icon:GetTexture(), iconOf(gq, "Chest", 5), "no weapon: the chest");
         H.assertEq(panel.setRow("Bare").Icon:GetTexture(), "Interface\\Icons\\INV_Misc_QuestionMark", "no items");
         local r, g, b = panel.setRow("Lost").Name:GetTextColor();
-        H.assertTrue(r == 1 and g == 0 and b == 0, "missing items: red name");
+        H.assertTrue(r == 1 and g == 0.82 and b == 0, "missing items: the name keeps its colour");
+        H.assertTrue(panel.setRow("Lost").Missing:IsShown(), "missing items: red tag");
+        H.assertEq(panel.setRow("Lost").Missing:GetText(), "missing");
+        r, g, b = panel.setRow("Lost").Missing:GetTextColor();
+        H.assertTrue(r == 1 and g < 0.2 and b < 0.2, "the tag is red");
         H.assertEq(GqUiFrameStatusText:GetText(), "Current set: Tank", "status line");
         H.assertTrue(GqUiFrame_BtnSaveSet:IsEnabled() and GqAddSetButton:IsEnabled(), "footer buttons");
 
@@ -82,7 +87,8 @@ return {
         H.assertEq(CharacterFinger0Slot.icon:GetAlpha(), 1, "slots restored");
         H.assertFalse(GQ_Tooltip_1:IsShown(), "tooltip hidden");
         r, g, b = lost.Name:GetTextColor();
-        H.assertTrue(r == 1 and g == 0 and b == 0, "red again after hover");
+        H.assertTrue(r == 1 and g == 0.82 and b == 0, "gold again after hover");
+        H.assertTrue(lost.Missing:IsShown(), "tag stays");
         H.assertFalse(lost.HighlightBar:IsShown());
         H.assertEq(GqUiFrameStatusText:GetText(), "Current set: Tank");
 
@@ -108,8 +114,8 @@ return {
         for _, e in ipairs(entries) do
             texts[#texts + 1] = e.divider and "-" or e.text;
         end
-        H.assertEq(table.concat(texts, "|"), "DPS|Equip|Save worn gear into this set|Partial set|-|Put in bank|" ..
-            "Take from bank|-|Delete...", "menu entries");
+        H.assertEq(table.concat(texts, "|"), "DPS|Equip|Save worn gear into this set|Partial set|Colour|-|" ..
+            "Put in bank|Take from bank|-|Delete...", "menu entries");
         H.assertTrue(panel.menuEntry(entries, "DPS").title, "set name as title");
         H.assertTrue(panel.menuEntry(entries, "Partial set").checkbox, "partial is a checkbox");
         H.assertTrue(panel.menuEntry(entries, "Partial set").enabled, "enabled for the current set");

@@ -144,14 +144,17 @@ local function SetStatusText(text)
 end
 
 local function ShowCurrentSetStatus()
-    SetStatusText(c:GetText("%s: %s", c:GetText("Current set"), c:LoadCurrentSetName() or UNKNOWN));
+    local currentSet = c:LoadCurrentSetName();
+    SetStatusText(c:GetText("%s: %s", c:GetText("Current set"),
+        currentSet and c:ColorizeSetName(currentSet) or UNKNOWN));
 end
 
 local function SetNameColor(row, setName)
-    if c:IsSetAvailable(setName) then
-        row.Name:SetTextColor(unpack(row.nameColor));
+    local r, g, b = c:GetSetColorRGB(setName);
+    if r then
+        row.Name:SetTextColor(r, g, b);
     else
-        row.Name:SetTextColor(1, 0, 0);
+        row.Name:SetTextColor(unpack(row.nameColor));
     end
 end
 
@@ -213,9 +216,73 @@ local function WhenUnlocked(func)
     end;
 end
 
+local function IsPaletteColor(hex)
+    for _, entry in ipairs(c:GetSetColorPalette()) do
+        if entry.hex == hex then
+            return true;
+        end
+    end
+    return false;
+end
+
+local function ToHex(r, g, b)
+    return string.format("%02x%02x%02x", math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5),
+        math.floor(b * 255 + 0.5));
+end
+
+-- live preview while the picker is open; Cancel, Escape or a click outside puts the old colour back
+local function PickCustomColor(setName)
+    local previous = c:LoadSetColor(setName);
+    local r, g, b = 1, 1, 1;
+    if previous then
+        r, g, b = c:GetSetColorRGB(setName);
+    end
+    ColorPickerFrame:SetupColorPickerAndShow({
+        r = r,
+        g = g,
+        b = b,
+        swatchFunc = function()
+            c:SaveSetColor(setName, ToHex(ColorPickerFrame:GetColorRGB()));
+        end,
+        cancelFunc = function()
+            c:SaveSetColor(setName, previous);
+        end
+    });
+end
+
+-- "Colour" submenu: the palette (each name in its colour), Custom... (in the custom colour once one is set), None
+local function AddColorMenu(root, setName)
+    local colorMenu = root:CreateButton(c:GetText("Colour"));
+    local function IsSelected(hex)
+        return c:LoadSetColor(setName) == hex;
+    end
+    local function SetSelected(hex)
+        c:SaveSetColor(setName, hex);
+    end
+    for _, entry in ipairs(c:GetSetColorPalette()) do
+        colorMenu:CreateRadio(c:FormatTextWithColor(c:GetText(entry.name), entry.hex), IsSelected,
+            WhenUnlocked(SetSelected), entry.hex);
+    end
+
+    colorMenu:CreateDivider();
+    local current = c:LoadSetColor(setName);
+    local isCustom = current ~= nil and not IsPaletteColor(current);
+    local customText = c:GetText("Custom...");
+    if isCustom then
+        customText = c:FormatTextWithColor(customText, current);
+    end
+    local custom = colorMenu:CreateRadio(customText, function()
+        return isCustom;
+    end, WhenUnlocked(function()
+        PickCustomColor(setName);
+    end));
+    custom:SetEnabled(ColorPickerFrame ~= nil and ColorPickerFrame.SetupColorPickerAndShow ~= nil);
+    colorMenu:CreateRadio(c:GetText("None"), IsSelected, WhenUnlocked(SetSelected));
+end
+
 local function OpenSetMenu(row, setName)
     c:OpenContextMenu("set", row, function(owner, root)
-        root:CreateTitle(setName);
+        root:CreateTitle(c:ColorizeSetName(setName));
         root:CreateButton(c:GetText("Equip"), WhenUnlocked(function()
             EquipSet(setName);
         end));
@@ -237,6 +304,7 @@ local function OpenSetMenu(row, setName)
                 GameTooltip_AddNormalLine(tooltip, c:GetText("Equip the set to choose its slots."));
             end);
         end
+        AddColorMenu(root, setName);
 
         root:CreateDivider();
         local atBank = c:IsAtBank() == true;
@@ -334,6 +402,9 @@ local function BuildSetRow(row)
     row.Partial = row.Content:CreateFontString(nil, "ARTWORK", "GameFontDisableSmallLeft");
     row.Partial:SetPoint("TOPLEFT", row.Name, "BOTTOMLEFT", 0, -2);
     row.Partial:SetText(c:GetText("partial"));
+    row.Missing = row.Content:CreateFontString(nil, "ARTWORK", "GameFontRedSmall");
+    row.Missing:SetTextColor(RED_FONT_COLOR:GetRGB());
+    row.Missing:SetText(c:GetText("missing"));
 
     row.Tick = row.Content:CreateTexture(nil, "OVERLAY");
     row.Tick:SetAtlas("UI-Character-Info-Icon-Tick", true);
@@ -405,6 +476,7 @@ local function InitSetRow(row, data)
     c:Skin("panel", row);
     c:Skin("font", row.Name);
     c:Skin("font", row.Partial);
+    c:Skin("font", row.Missing);
     c:Skin("font", row.SpecText);
     c:Skin("button", row.ToBank);
     c:Skin("button", row.ToBags);
@@ -435,11 +507,20 @@ local function InitSetRow(row, data)
     row.ToBags:SetShown(atBank);
 
     local isPartial = c:LoadPartialOption(setName) == true;
+    local isMissing = not c:IsSetAvailable(setName);
+    local nameOffset = (isPartial or isMissing) and 6 or 0;
     row.Partial:SetShown(isPartial);
+    row.Missing:SetShown(isMissing);
+    row.Missing:ClearAllPoints();
+    if isPartial then
+        row.Missing:SetPoint("LEFT", row.Partial, "RIGHT", 6, 0);
+    else
+        row.Missing:SetPoint("TOPLEFT", row.Name, "BOTTOMLEFT", 0, -2);
+    end
     row.Name:SetText(setName);
     row.Name:ClearAllPoints();
-    row.Name:SetPoint("LEFT", row.Icon, "RIGHT", 10, isPartial and 6 or 0);
-    row.Name:SetPoint("RIGHT", atBank and row.ToBank or row.Tick, "LEFT", -4, isPartial and 6 or 0);
+    row.Name:SetPoint("LEFT", row.Icon, "RIGHT", 10, nameOffset);
+    row.Name:SetPoint("RIGHT", atBank and row.ToBank or row.Tick, "LEFT", -4, nameOffset);
     SetNameColor(row, setName);
 
     ApplySetRowLock(row);
@@ -649,6 +730,23 @@ function c:RefreshSetList(scrollIntoView)
     end
 
     c:ShowSetInfo(currentSet);
+end
+
+-- a set colour changed: cheap enough for the picker's live preview (no list rebuild)
+function c:RefreshSetColors()
+    if built and GqUiFrame:IsVisible() then
+        setList:ForEachFrame(function(row)
+            local setName = GetRowSetName(row);
+            if setName then
+                SetNameColor(row, setName);
+            end
+        end);
+        ShowCurrentSetStatus();
+    end
+    if c.paperDollFrame then
+        c:SetPaperDollLabelText();
+    end
+    c:UpdateBroker();
 end
 
 -- footer state for the current set (Save needs one)

@@ -20,6 +20,7 @@ core\gearquipper-data.lua
 core\gearquipper-misc.lua
 core\gearquipper-broker.lua
 core\gearquipper-skin.lua
+core\gearquipper-guard.lua
 
 ui\gearquipper-ui.lua
 ui\gearquipper-ui-frame.lua

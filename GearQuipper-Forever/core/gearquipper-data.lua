@@ -26,6 +26,7 @@ local FIELD_AFFECTS_HELMET = "FIELD_AFFECTS_HELMET";
 local FIELD_AFFECTS_CLOAK = "FIELD_AFFECTS_CLOAK";
 
 local FIELD_OPT_PARTIAL = "FIELD_OPT_PARTIAL";
+local FIELD_COLOR = "FIELD_COLOR"; -- "rrggbb"
 
 -- set fields written by GearQuipper v54 for features that do not exist on Forever (action bars, key bindings)
 local OBSOLETE_SET_FIELDS = {"FIELD_ACTIONSLOTS", "FIELD_OPT_ACTIONSLOTS", "FIELD_KEYBINDINGS"};
@@ -189,6 +190,71 @@ function c:RemoveSet(setName)
     c:SetPaperDollLabelText();
     c:HideSlotStateBoxes();
     c:NotifyEventListeners(GQ_EVENT_SET_REMOVED, setName, setName);
+end
+
+----- [ set colours ] -----
+
+-- Light colours that read on dark tooltips and on the panel. No red (missing items, "Expected Item") and no gold
+-- (default text); none is an item-quality colour.
+local SET_COLOR_PALETTE = {
+    {name = "Sky", hex = "66b3ff"},
+    {name = "Teal", hex = "33d6c2"},
+    {name = "Mint", hex = "7ff0a8"},
+    {name = "Lime", hex = "c2f060"},
+    {name = "Apricot", hex = "ff9e6b"},
+    {name = "Pink", hex = "ff85c8"},
+    {name = "Lavender", hex = "b8a1ff"},
+    {name = "Silver", hex = "c9d1dc"}
+};
+
+function c:GetSetColorPalette()
+    return SET_COLOR_PALETTE;
+end
+
+local function NormalizeHex(hex)
+    if type(hex) == "string" and hex:match("^%x%x%x%x%x%x$") then
+        return hex:lower();
+    end
+end
+
+local function GetColorableSet(setName)
+    if setName and setName ~= c.KEYWORD_PREVIOUSEQUIPMENT then
+        return GQ_DATA[c:GetRealmName()][c:GetCharName()][FIELD_SETS][setName];
+    end
+end
+
+-- "rrggbb", or nil when the set has no (valid) colour
+function c:LoadSetColor(setName)
+    local set = GetColorableSet(setName);
+    return set and NormalizeHex(set[FIELD_COLOR]);
+end
+
+-- hex "rrggbb" or nil (no colour); returns true when saved
+function c:SaveSetColor(setName, hex)
+    c:DebugPrint("SaveSetColor", setName, hex);
+    local set = GetColorableSet(setName);
+    if not set or (hex ~= nil and not NormalizeHex(hex)) then
+        return false;
+    end
+    set[FIELD_COLOR] = NormalizeHex(hex);
+    c:RefreshSetColors();
+    return true;
+end
+
+function c:GetSetColorRGB(setName)
+    local hex = c:LoadSetColor(setName);
+    if hex then
+        return tonumber(hex:sub(1, 2), 16) / 255, tonumber(hex:sub(3, 4), 16) / 255, tonumber(hex:sub(5, 6), 16) / 255;
+    end
+end
+
+-- the set name wrapped in its colour; plain without one
+function c:ColorizeSetName(setName)
+    local hex = c:LoadSetColor(setName);
+    if hex then
+        return c:FormatTextWithColor(setName, hex);
+    end
+    return setName;
 end
 
 ----- [ slots ] -----

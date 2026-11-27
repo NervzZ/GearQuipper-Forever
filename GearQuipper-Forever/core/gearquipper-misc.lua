@@ -447,13 +447,14 @@ function c:GetMatchingItems(slotId)
     -- bank tabs (empty unless the bank is open)
     AddContainerItems(c:GetBankBagIds());
 
-    -- equipped items (dual wield, rings, trinkets)
+    -- equipped items (dual wield, rings, trinkets); the other slot may hold an item that does not fit this one
     local itemString = c:GetItemString(slotId);
     if not c:IsEmpty(itemString) and IsMatching(itemString) then
         local itemSlots = c:GetItemSlots(itemString);
         for _, equippedSlotId in ipairs(itemSlots) do
             local equippedItemString = c:GetItemString(equippedSlotId);
-            if not c:IsEmpty(equippedItemString) and not c:Equals(equippedItemString, itemString) then
+            if not c:IsEmpty(equippedItemString) and not c:Equals(equippedItemString, itemString) and
+                IsMatching(equippedItemString) then
                 table.insert(result, CreateEntry(nil, equippedSlotId, equippedItemString));
             end
         end

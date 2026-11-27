@@ -1033,3 +1033,18 @@ function H.dumpInventory()
     end
     return table.concat(lines, "\n");
 end
+
+---------------------------------------------------------------------------
+-- internals for mock extensions kept in their own files (mock/merchant.lua)
+---------------------------------------------------------------------------
+H.inventoryInternals = {
+    bagLoc = bagLoc, equipLoc = equipLoc, key = key, getAt = getAt, setAt = setAt, lock = lock, unlock = unlock,
+    isLocked = isLocked, noteChange = noteChange, emitChanges = emitChanges, firstFreeBagSlot = firstFreeBagSlot,
+    accessible = accessible, pickup = pickup, clearCursor = clearCursor, sortedKeys = sortedKeys,
+    getCursor = function()
+        return cursor;
+    end,
+    setCursor = function(value)
+        cursor = value;
+    end,
+};

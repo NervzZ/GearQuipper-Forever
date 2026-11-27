@@ -12,6 +12,11 @@ GQ_EVENT_SET_SAVED = "GQ_EVENT_SET_SAVED";
 GQ_EVENT_SLOT_SAVED = "GQ_EVENT_SLOT_SAVED";
 GQ_EVENT_SLOT_STATE_SAVED = "GQ_EVENT_SLOT_STATE_SAVED";
 
+-- set names in the broker tooltip: their set colour, white without one
+local function SetNameText(setName)
+    return c:FormatTextWithColor(setName, c:LoadSetColor(setName) or "FFFFFF");
+end
+
 function c:InitBroker()
     if LibStub and not LDB then
         local libDataBroker = LibStub('LibDataBroker-1.1', true);
@@ -29,9 +34,9 @@ function c:InitBroker()
                     self:AddLine("|cFFFFFFFFGearQuipper|r");
                     self:AddLine(" ");
 
-                    local currentSet = c:LoadCurrentSetName() or UNKNOWN;
+                    local currentSet = c:LoadCurrentSetName();
                     self:AddLine(c:GetText("%s: %s", c:GetText("Current set"),
-                        c:FormatTextWithColor(currentSet, "FFFFFF")));
+                        currentSet and SetNameText(currentSet) or c:FormatTextWithColor(UNKNOWN, "FFFFFF")));
 
                     self:AddLine(" ");
                     if c:IsEventsEnabled() then
@@ -55,13 +60,15 @@ function c:InitBroker()
                                     environment = environment .. " )";
                                 end
                                 local setName = binding[c.FIELD_NAME] or UNKNOWN;
+                                local setText;
                                 if setName == c.KEYWORD_PREVIOUS then
-                                    setName = c:GetText("[Previous equipment]");
+                                    setText = c:FormatTextWithColor(c:GetText("[Previous equipment]"), "FFFFFF");
+                                else
+                                    setText = SetNameText(setName);
                                 end
                                 local eventName = c:GetEvents()[binding[c.FIELD_TYPE]] or tostring(type or UNKNOWN);
                                 self:AddLine(c:GetText("%s will switch to %s %s",
-                                    c:FormatTextWithColor(eventName, "FFFFFF"), c:FormatTextWithColor(setName, "FFFFFF"),
-                                    environment or ""));
+                                    c:FormatTextWithColor(eventName, "FFFFFF"), setText, environment or ""));
                             end
                         else
                             self:AddLine(c:GetText("Active event bindings:") .. " " ..
@@ -119,14 +126,14 @@ function c:PopulateBrokerMenu(root)
         end
     end
     for _, setName in ipairs(c:LoadSetNames(false)) do
-        root:CreateRadio(setName, isSelected, setSelected, setName);
+        root:CreateRadio(c:ColorizeSetName(setName), isSelected, setSelected, setName);
     end
 end
 
 function c:UpdateBroker()
     if LDB then
-        local currentSet = c:LoadCurrentSetName() or UNKNOWN;
-        LDB.text = currentSet;
+        local currentSet = c:LoadCurrentSetName();
+        LDB.text = currentSet and c:ColorizeSetName(currentSet) or UNKNOWN;
     end
 end
 

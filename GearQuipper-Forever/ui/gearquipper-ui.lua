@@ -34,6 +34,23 @@ local function GetFrameEdge(frame, edge, targetFrame)
     return value;
 end
 
+-- "GearQuipper set(s): A, B" with the names in their set colours; true when the line was added
+local function AddItemSetsLine(tooltip, itemString)
+    if c:IsEmpty(itemString) then
+        return false;
+    end
+    local names = {};
+    for _, setName in ipairs(c:GetItemSets(itemString)) do
+        table.insert(names, c:ColorizeSetName(setName));
+    end
+    if #names == 0 then
+        return false;
+    end
+    tooltip:AddLine(" ");
+    tooltip:AddDoubleLine(c:GetText("GearQuipper set(s):"), table.concat(names, ", "));
+    return true;
+end
+
 ----- general ui stuff -----
 
 function c:InitUI(paperDollFrame)
@@ -93,11 +110,14 @@ function c:InitUI(paperDollFrame)
 
                     if slotId then
                         -- inventory slot item tooltip
+                        local spacing = AddItemSetsLine(tooltip, c:GetItemString(slotId));
                         local setName = c:LoadCurrentSetName();
                         if setName and (not c:LoadPartialOption(setName) or c:LoadSlotState(slotId, setName)) then
                             local itemString = c:LoadSlot(slotId, setName);
                             if not c:IsSetItemOnSlot(slotId, itemString) then
-                                tooltip:AddLine(" ");
+                                if not spacing then
+                                    tooltip:AddLine(" ");
+                                end
                                 tooltip:AddDoubleLine(c:FormatTextWithColor(c:GetText("Expected Item:"), "ff0000"),
                                     c:GetItemLink(itemString));
                             end
@@ -106,12 +126,7 @@ function c:InitUI(paperDollFrame)
                         -- bag/bank slot item tooltip
                         local itemString = c:GetItemString(itemLink);
                         if not c:IsEmpty(itemString) then
-                            local sets, spacing = c:GetItemSets(itemString);
-                            if sets and getn(sets) > 0 then
-                                tooltip:AddLine(" ");
-                                tooltip:AddDoubleLine(c:GetText("GearQuipper set(s):"), table.concat(sets, ", "));
-                                spacing = true;
-                            end
+                            local spacing = AddItemSetsLine(tooltip, itemString);
                             if GQ_OPTIONS[c.OPT_SET_ITEM_COMPARISON_SHOW_HINT] then
                                 local itemSlots = c:GetItemSlots(itemString);
                                 if itemSlots and getn(itemSlots) > 0 then
@@ -310,8 +325,9 @@ function c:CreatePaperDollButton()
     button:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
         GameTooltip_SetTitle(GameTooltip, "GearQuipper");
+        local currentSet = c:LoadCurrentSetName();
         GameTooltip_AddNormalLine(GameTooltip,
-            c:GetText("%s: %s", c:GetText("Current set"), c:LoadCurrentSetName() or UNKNOWN));
+            c:GetText("%s: %s", c:GetText("Current set"), currentSet and c:ColorizeSetName(currentSet) or UNKNOWN));
         GameTooltip:Show();
     end);
     button:SetScript("OnLeave", function()
@@ -357,15 +373,20 @@ function c:SetPaperDollLabelText(setName)
         if not setName then
             c.paperDollFrame.paperDollLabel.text:SetFormattedText("%s%s: %s", "|cffff0000", c:GetText("Current set"),
                 UNKNOWN);
-        elseif c:GetTableSize(c:GetIgnoredItems()) > 0 then
-            c.paperDollFrame.paperDollLabel.text:SetFormattedText("%s%s: \"%s\"", "|cff6977f0",
-                c:GetText("Current set"), setName);
-        elseif c:IsSetComplete() then
-            c.paperDollFrame.paperDollLabel.text:SetFormattedText("%s%s: \"%s\"", "|cffffcc00",
-                c:GetText("Current set"), setName);
         else
-            c.paperDollFrame.paperDollLabel.text:SetFormattedText("%s%s: \"%s\"", "|cffff0000",
-                c:GetText("Current set"), setName);
+            -- the prefix colour shows the set's state; only the name takes the set colour
+            local prefixColor = "|cffff0000";
+            if c:GetTableSize(c:GetIgnoredItems()) > 0 then
+                prefixColor = "|cff6977f0";
+            elseif c:IsSetComplete() then
+                prefixColor = "|cffffcc00";
+            end
+            local name = setName;
+            if c:LoadSetColor(setName) then
+                name = c:ColorizeSetName(setName) .. prefixColor;
+            end
+            c.paperDollFrame.paperDollLabel.text:SetFormattedText("%s%s: \"%s\"", prefixColor,
+                c:GetText("Current set"), name);
         end
         c.paperDollFrame.paperDollLabel:Show();
     else

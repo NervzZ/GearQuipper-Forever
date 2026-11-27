@@ -20,6 +20,10 @@
 --                       PanelTemplates_*, SharedButton*, UIPanelButton, UICheckButton, MinimalCheckbox
 --   mock/scroll.lua     DataProvider, WowScrollBoxList + linear view, MinimalScrollBar, ScrollUtil
 --   mock/menu.lua       MenuUtil, Menu manager, DropdownButton, WowStyle1/2 dropdown templates
+--   mock/colorpicker.lua ColorPickerFrame (Blizzard_ColorPickerFrame, Mainline)
+--   mock/merchant.lua   buyback list + sell paths, money, item GUIDs / ItemLocation / C_Cursor, Blizzard's
+--                       delete / refund / trade-timer popups (StaticPopup2-4) + PopupEventManager
+--   mock/gamepad.lua    the popups' gamepad button sequence (one-shot per popup frame, as on Forever)
 --   mock/suites.lua     EllesmereUI / ElvUI stubs (scenario field `suites`, or H.installSuites from setup)
 --   mock/assert.lua     assertions and scenario helpers
 --
@@ -43,6 +47,9 @@
 --                assertSetMatchesGear(gq, set) assertChat/assertChatAny/assertNoChat assertNoErrors fail log
 --   knobs        latency blockCombatPickups strictSecrets syncCursorLockEvents player.* zone
 --   logs         errors warnings chat uiErrors blocked secretReads eventLog sounds popups
+--   merchant     sellBagItem dragToMerchant sellAllJunk closeMerchant bagSlotOf buyback buybackCalls money
+--   popups       blizzPopup clickPopup typeInPopup enterInPopup deleteItem gamepadDeleteItem gamepadConfirm
+--                simulateAutoFillDelete simulateLeatrixEasyDestroy deleted refunded (mock/merchant.lua)
 local H = ...;
 
 H.include("mock/env.lua");
@@ -58,6 +65,9 @@ H.include("mock/blizzui.lua");
 H.include("mock/templates.lua");
 H.include("mock/scroll.lua");
 H.include("mock/menu.lua");
+H.include("mock/colorpicker.lua");
+H.include("mock/merchant.lua");
+H.include("mock/gamepad.lua");
 H.include("mock/suites.lua");
 H.include("mock/assert.lua");
 

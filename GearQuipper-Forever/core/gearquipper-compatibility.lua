@@ -347,6 +347,54 @@ function c:FindFreeContainerSlot(bagIds, preferredBagId)
 end
 
 ---------------------------------------------------------------------------
+-- merchant (sell guard)
+---------------------------------------------------------------------------
+-- The buyback list has no C_ API on Forever; Blizzard's MerchantFrame uses these globals. Index 1 is the oldest entry,
+-- GetNumBuybackItems() the newest.
+function c:GetNumBuybackItems()
+    return c:SafeCall(GetNumBuybackItems) or 0;
+end
+
+function c:GetBuybackItemLink(index)
+    return c:SafeCall(GetBuybackItemLink, index);
+end
+
+function c:BuybackItem(index)
+    return BuybackItem(index);
+end
+
+-- Sells a bag item, only meant while a merchant is open (anywhere else UseContainerItem uses, equips or banks it).
+function c:SellContainerItem(bagId, slotId)
+    return C_Container.UseContainerItem(bagId, slotId);
+end
+
+---------------------------------------------------------------------------
+-- cursor and item GUIDs (delete guard)
+---------------------------------------------------------------------------
+function c:GetItemLinkByGUID(itemGUID)
+    if not itemGUID or not C_Item.GetItemLinkByGUID then
+        return nil;
+    end
+    return c:SafeCall(C_Item.GetItemLinkByGUID, itemGUID);
+end
+
+-- Link of the item on the cursor, or nil.
+function c:GetCursorItemLink()
+    local location = C_Cursor and C_Cursor.GetCursorItem and c:SafeCall(C_Cursor.GetCursorItem);
+    if location and c:ReadState(C_Item.DoesItemExist, location) then
+        local link = c:SafeCall(C_Item.GetItemLink, location);
+        if link then
+            return link;
+        end
+    end
+    local ok, kind, _, link = pcall(GetCursorInfo);
+    if ok and kind == "item" and not issecretvalue(link) then
+        return link;
+    end
+    return nil;
+end
+
+---------------------------------------------------------------------------
 -- add-ons, settings, tooltips
 ---------------------------------------------------------------------------
 function c:GetAddOnInfo(nameOrIndex)

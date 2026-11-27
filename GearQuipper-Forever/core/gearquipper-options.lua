@@ -16,6 +16,7 @@ local lblSaveChanges, chSaveAlways, chSaveCharMenu, chSaveGqMenu, chSaveNever;
 local saveChangesButtons = {};
 local chIgnoreManuallySwitchedItems;
 local chSetItemComparison, chSetItemComparison_ShowHint;
+local chProtectSell, chProtectDelete;
 
 local lblVisualSettings;
 local chHighlightChanges, chConfirmChangesInChat, chShowCurrentSetLabel, chShowItemTooltip, chShowSlotBackgroundColors,
@@ -43,6 +44,8 @@ local function RefreshOptionsPanel()
     chSetItemComparison:SetChecked(GQ_OPTIONS[c.OPT_SET_ITEM_COMPARISON]);
     chSetItemComparison_ShowHint:SetChecked(GQ_OPTIONS[c.OPT_SET_ITEM_COMPARISON_SHOW_HINT]);
     c:SetCheckboxEnabled(chSetItemComparison_ShowHint, GQ_OPTIONS[c.OPT_SET_ITEM_COMPARISON] and true or false);
+    chProtectSell:SetChecked(GQ_OPTIONS[c.OPT_PROTECT_SELL]);
+    chProtectDelete:SetChecked(GQ_OPTIONS[c.OPT_PROTECT_DELETE]);
 
     lblSwitchDelay.fontString:SetText(c:GetText("Set switch delay: %sms", tostring(GQ_OPTIONS[c.OPT_SWITCHDELAY])));
     sldSwitchDelay:SetValue(GQ_OPTIONS[c.OPT_SWITCHDELAY]);
@@ -150,6 +153,12 @@ local function BuildOptionsPanel()
         optionsPanel.margin);
     optionsPanel.elementIndex = optionsPanel.elementIndex + 1;
 
+    chProtectSell = CreateOptionToggle(c.OPT_PROTECT_SELL, c:GetText("Protect set items from selling"));
+    optionsPanel.elementIndex = optionsPanel.elementIndex + 1;
+
+    chProtectDelete = CreateOptionToggle(c.OPT_PROTECT_DELETE, c:GetText("Protect set items from deleting"));
+    optionsPanel.elementIndex = optionsPanel.elementIndex + 1;
+
     lblSwitchDelay = CreateFrame("Frame", "GqUiOptionElement_lblSwitchDelay", optionsPanel);
     lblSwitchDelay:SetPoint("TOPLEFT", optionsPanel.margin, -(optionsPanel.elementIndex - 1) *
         optionsPanel.checkboxYOffset - optionsPanel.margin - 10);
@@ -234,6 +243,8 @@ function c:InitOptions()
     c.OPT_IGNOREMANUALITEMS = "OPT_IGNOREMANUALITEMS";
     c.OPT_SET_ITEM_COMPARISON = "OPT_SET_ITEM_COMPARISON";
     c.OPT_SET_ITEM_COMPARISON_SHOW_HINT = "OPT_SET_ITEM_COMPARISON_SHOW_HINT";
+    c.OPT_PROTECT_SELL = "OPT_PROTECT_SELL";
+    c.OPT_PROTECT_DELETE = "OPT_PROTECT_DELETE";
 
     c.OPT_SWITCHDELAY = "OPT_SWITCHDELAY";
 
@@ -298,6 +309,14 @@ function c:InitOptions()
 
     if GQ_OPTIONS[c.OPT_SET_ITEM_COMPARISON_SHOW_HINT] == nil then
         GQ_OPTIONS[c.OPT_SET_ITEM_COMPARISON_SHOW_HINT] = true;
+    end
+
+    if GQ_OPTIONS[c.OPT_PROTECT_SELL] == nil then
+        GQ_OPTIONS[c.OPT_PROTECT_SELL] = true;
+    end
+
+    if GQ_OPTIONS[c.OPT_PROTECT_DELETE] == nil then
+        GQ_OPTIONS[c.OPT_PROTECT_DELETE] = true;
     end
 
     GQ_OPTIONS[c.OPT_SAVECHANGES] = GQ_OPTIONS[c.OPT_SAVECHANGES] or c.OPTVALUE_SAVECHANGES_GQMENU;

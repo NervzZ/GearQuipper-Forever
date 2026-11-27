@@ -177,3 +177,31 @@ L["Detail"]                                                                     
 L["Detail 2"]                                                                                           = "Detail 2";
 L["Set"]                                                                                                = "Set";
 L["Add"]                                                                                                = "Hinzufügen";
+
+-- set colours
+L["Colour"]                                                                                             = "Farbe";
+L["Custom..."]                                                                                          = "Eigene...";
+L["None"]                                                                                               = "Keine";
+L["missing"]                                                                                            = "fehlend";
+L["Sky"]                                                                                                = "Himmelblau";
+L["Teal"]                                                                                               = "Türkis";
+L["Mint"]                                                                                               = "Mintgrün";
+L["Lime"]                                                                                               = "Limettengrün";
+L["Apricot"]                                                                                            = "Aprikose";
+L["Pink"]                                                                                               = "Rosa";
+L["Lavender"]                                                                                           = "Lavendel";
+L["Silver"]                                                                                             = "Silber";
+
+-- sell and delete guard
+L["Protect set items from selling"]                                                                     = "Set-Gegenstände vor dem Verkauf schützen";
+L["Protect set items from deleting"]                                                                    = "Set-Gegenstände vor dem Zerstören schützen";
+L["set %s"]                                                                                             = "Set %s";
+L["sets %s"]                                                                                            = "Sets %s";
+L["Are you sure you want to sell %s? This item is saved in %s."]                                        = "Möchtest du %s wirklich verkaufen? Dieser Gegenstand ist in %s gespeichert.";
+L["This item is saved in %s. Destroy it anyway?"]                                                       = "Dieser Gegenstand ist in %s gespeichert. Trotzdem zerstören?";
+L["This item is saved in %s. Refund it anyway?"]                                                        = "Dieser Gegenstand ist in %s gespeichert. Trotzdem zurückgeben?";
+L["Destroy anyway"]                                                                                     = "Trotzdem zerstören";
+L["Refund anyway"]                                                                                      = "Trotzdem zurückgeben";
+L["Keep"]                                                                                               = "Behalten";
+L["Something keeps selling %s (saved in %s); GearQuipper stopped buying it back at this merchant."]     = "Etwas verkauft %s (gespeichert in %s) immer wieder; GearQuipper kauft es bei diesem Händler nicht mehr zurück.";
+L["%s (saved in %s) is still in the merchant's buyback list; GearQuipper buys it back at the next merchant."] = "%s (gespeichert in %s) ist noch in der Rückkaufliste des Händlers; GearQuipper kauft es beim nächsten Händler zurück.";
