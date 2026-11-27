@@ -1,0 +1,16 @@
+package-as: GearQuipper-Forever
+
+move-folders:
+  GearQuipper-Forever/GearQuipper-Forever: GearQuipper-Forever
+
+ignore:
+  - tools
+  - CURSEFORGE.md
+  - GearQuipper-Forever/libs/LibStub/tests
+  - reference
+  - CC-Session-Logs
+  - CLAUDE.md
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown

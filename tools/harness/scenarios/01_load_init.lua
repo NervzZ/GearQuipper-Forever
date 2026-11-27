@@ -13,6 +13,10 @@ end
 return function(H, gq)
     H.assertTrue(gq, "global gearquipper table exists");
     H.assertTrue(gq.initFinished, "Init() ran on ADDON_LOADED");
+    -- the release version from the TOC, not the data version (details: 27_version_strings)
+    H.assertChat("AddOn loaded: Version: " .. H.tocFields.Version:gsub("%.", "%%.") .. "%. Type /gq",
+        "load line with the TOC version");
+    H.assertNoChat("curseforge", "no pointer to the original addon's page");
     H.advance(2);
 
     local names = gq:LoadSetNames();

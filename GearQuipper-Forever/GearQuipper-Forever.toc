@@ -2,7 +2,7 @@
 ## Title: GearQuipper |c004AAAE7Forever|r
 ## Notes: Quick switch your gear sets. GearQuipper revived for WoW Forever.
 ## Author: Benjamin Bober (original), Forever revival by NervzZ
-## Version: 55
+## Version: 1.0.0
 ## IconTexture: Interface\Icons\INV_Chest_Plate16
 ## SavedVariables: GQ_DATA, GQ_OPTIONS
 ## OptionalDeps: LibStub, LibDataBroker-1.1, CallbackHandler-1.0, EllesmereUI, ElvUI

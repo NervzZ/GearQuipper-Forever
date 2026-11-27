@@ -1,0 +1,86 @@
+name: Test
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install lupa==2.8 luaparser==4.2.0
+      - name: Static checks
+        run: python tools/check.py
+      - name: Harness
+        run: python tools/harness/run.py
+      - name: Harness with server latency
+        run: python tools/harness/run.py --latency 0.15
+      - name: Version and changelog
+        run: |
+          version=$(bash tools/version.sh)
+          # HEAD is the merge of the pull request into main, HEAD^1 is main.
+          old=$(git show HEAD^1:GearQuipper-Forever/GearQuipper-Forever.toc 2> /dev/null | tr -d '\r' | sed -n 's/^## Version:[[:space:]]*//p' || true)
+          # Before the first release the TOC carried GearQuipper's data number (55): no version to compare with.
+          if [[ ! $old =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::notice::main has no release version yet ('$old'), nothing to compare $version with."
+          elif [[ $(printf '%s\n' "$old" "$version" | sort -V | tail -n 1) != "$version" ]]; then
+            echo "::error::The version went down from $old to $version."
+            exit 1
+          fi
+          if ! git diff --quiet HEAD^1 HEAD -- GearQuipper-Forever && git rev-parse -q --verify "refs/tags/$version" > /dev/null; then
+            echo "::error::The addon changed, but $version is already published. Raise the version in GearQuipper-Forever.toc."
+            exit 1
+          fi
+      - name: Package without uploading
+        uses: BigWigsMods/packager@01e8631a69c69d7654c788d152630d5fed9e3812 # v2.7.0
+        with:
+          args: -d
+      - name: Check the package
+        run: |
+          shopt -s nullglob
+          zips=(.release/*.zip)
+          if (( ${#zips[@]} != 1 )); then
+            echo "::error::Expected one zip in .release, found ${#zips[@]}."
+            exit 1
+          fi
+          zip=${zips[0]}
+          unzip -l "$zip"
+          files=$(unzip -Z1 "$zip")
+          failed=0
+          problem() {
+            echo "::error::$1"
+            failed=1
+          }
+          # One folder named like the addon, with its TOC directly inside.
+          if ! grep -qxF GearQuipper-Forever/GearQuipper-Forever.toc <<< "$files"; then
+            echo "::error::GearQuipper-Forever/GearQuipper-Forever.toc is not at the top of the zip."
+            exit 1
+          fi
+          outside=$(grep -v '^GearQuipper-Forever/' <<< "$files" || true)
+          [[ -z $outside ]] || problem "Outside the addon folder: $(paste -sd " " <<< "$outside")"
+          if grep -q '^GearQuipper-Forever/GearQuipper-Forever/' <<< "$files"; then
+            problem "The addon folder is nested in itself."
+          fi
+          toc=$(unzip -p "$zip" GearQuipper-Forever/GearQuipper-Forever.toc | tr -d '\r')
+          grep -qxF "## Version: $(bash tools/version.sh)" <<< "$toc" || problem "The packaged TOC has another version."
+          # Every file the TOC loads (its paths use backslashes, octal 134), and every other file of the addon
+          # folder except LibStub's tests.
+          while IFS= read -r entry; do
+            path="GearQuipper-Forever/$entry"
+            grep -qxF "$path" <<< "$files" || problem "Listed in the TOC but not in the zip: $path"
+          done < <(grep -v -e '^#' -e '^[[:space:]]*$' <<< "$toc" | tr '\134' /)
+          while IFS= read -r path; do
+            grep -qxF "$path" <<< "$files" || problem "Not in the zip: $path"
+          done < <(git -c core.quotePath=false ls-files GearQuipper-Forever | grep -v '^GearQuipper-Forever/libs/LibStub/tests/')
+          # Nothing that belongs to the repository only.
+          stray=$(grep -E -e '(^|/)(tools|reference|\.github|CC-Session-Logs)/' -e '(^|/)(CURSEFORGE\.md|CLAUDE\.md|\.pkgmeta|\.gitignore)$' -e '/libs/LibStub/tests/' <<< "$files" || true)
+          [[ -z $stray ]] || problem "Must not ship: $(paste -sd " " <<< "$stray")"
+          exit $failed

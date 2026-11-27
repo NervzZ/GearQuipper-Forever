@@ -144,7 +144,6 @@ L["toggleevents -> Toggles event bindings enabled or disabled."]                
 L["Update to version %s complete."]                                                                     = "Update auf Version %s komplett.";
 L["Unknown command. Possible parameters are: /gq ..."]                                                  = "Unbekannter Befehl. Mögliche Befehle sind: /gq ...";
 L["visible"]                                                                                            = "sichtbar";
-L["Visit https://www.curseforge.com/wow/addons/gearquipper for support, feedback and updates."]         = "Besuche https://www.curseforge.com/wow/addons/gearquipper für Support, Feedback und Updates."
 L["Visual Settings"]                                                                                    = "Visuelle Einstellungen";
 L["WARNING! Switching will fail if target set does not match the following conditions:\n- is partial with only weapon slots enabled"] = "WARNUNG! Setwechsel wird fehlschlagen, wenn Ziel-Set nicht folgende Bedingungen erfüllt:\n- ist partiell und nur Waffen-Slots sind aktiv";
 L["Weapon swaps in combat are blocked by the game; the switch will happen when combat ends."]           = "Waffenwechsel im Kampf werden vom Spiel blockiert; der Wechsel erfolgt nach dem Kampf.";

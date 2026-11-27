@@ -44,4 +44,3 @@ L["The AddOn has not been initialized due to an error. Please relog and try agai
 L["This will reset GearQuipper to defaults. All your sets will be lost.\n\nAre you sure?"]              = "Esto reiniciará GearQuipper a los ajustes predeterminados. Todos tus sets serán borrados.\n\n¿De acuerdo?";
 L["Unknown command. Possible parameters are: /gq ..."]                                                  = "Comando desconocido. Los parámetros aceptados son: /gq ...";
 L["visible"]                                                                                            = "visible";
-L["Visit https://www.curseforge.com/wow/addons/gearquipper for support, feedback and updates."]         = "Visita https://www.curseforge.com/wow/addons/gearquipper para recibir soporte, dar feedback y actualizaciones."
